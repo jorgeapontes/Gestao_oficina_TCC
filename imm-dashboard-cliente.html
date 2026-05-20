@@ -1,0 +1,590 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>IMM – Cliente</title>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #F5F4F2;
+      --surface:   #FFFFFF;
+      --border:    #E4E2DE;
+      --text:      #1A1917;
+      --muted:     #7A7872;
+      --tag-open:  #E8F2EC;
+      --tag-open-t:#2D7A4F;
+      --tag-prog:  #FEF4E4;
+      --tag-prog-t:#A05A00;
+      --tag-done:  #EDECEA;
+      --tag-done-t:#5A5750;
+      --sidebar-w: 230px;
+    }
+
+    body {
+      font-family: 'DM Sans', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      display: flex;
+      min-height: 100vh;
+    }
+
+    /* ── SIDEBAR ── */
+    aside {
+      width: var(--sidebar-w);
+      min-height: 100vh;
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      padding: 28px 0;
+      position: fixed;
+      top: 0; left: 0;
+    }
+    .logo { padding: 0 24px 28px; border-bottom: 1px solid var(--border); }
+    .logo-mark {
+      font-family: 'DM Mono', monospace;
+      font-size: 13px; font-weight: 500;
+      letter-spacing: 0.08em; color: var(--muted);
+      text-transform: uppercase; margin-bottom: 4px;
+    }
+    .logo-name { font-size: 15px; font-weight: 600; line-height: 1.3; }
+
+    nav {
+      flex: 1; padding: 20px 12px;
+      display: flex; flex-direction: column; gap: 2px;
+    }
+    .nav-label {
+      font-size: 10px; font-weight: 500;
+      letter-spacing: 0.1em; text-transform: uppercase;
+      color: var(--muted); padding: 14px 12px 6px;
+    }
+    .nav-item {
+      display: flex; align-items: center; gap: 10px;
+      padding: 9px 12px; border-radius: 8px;
+      font-size: 14px; color: var(--muted);
+      cursor: pointer; text-decoration: none;
+      transition: background 0.15s, color 0.15s;
+    }
+    .nav-item:hover { background: var(--bg); color: var(--text); }
+    .nav-item.active { background: var(--text); color: #fff; }
+    .nav-item .icon { width: 18px; height: 18px; opacity: 0.7; flex-shrink: 0; }
+    .nav-item.active .icon { opacity: 1; }
+
+    .sidebar-footer { padding: 20px 24px 0; border-top: 1px solid var(--border); }
+    .user-chip { display: flex; align-items: center; gap: 10px; }
+    .avatar {
+      width: 32px; height: 32px; border-radius: 50%;
+      background: var(--text); color: #fff;
+      font-size: 12px; font-weight: 600;
+      display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+    }
+    .user-name { font-size: 13px; font-weight: 500; }
+    .user-role { font-size: 11px; color: var(--muted); font-family: 'DM Mono', monospace; }
+
+    /* ── MAIN ── */
+    main { margin-left: var(--sidebar-w); flex: 1; padding: 40px 48px; }
+
+    .topbar {
+      display: flex; align-items: center;
+      justify-content: flex-end; gap: 12px; margin-bottom: 32px;
+    }
+    .notif-btn {
+      width: 36px; height: 36px; border: 1px solid var(--border);
+      border-radius: 8px; background: var(--surface);
+      display: flex; align-items: center; justify-content: center;
+      cursor: pointer; position: relative;
+    }
+    .notif-dot {
+      width: 7px; height: 7px; background: #C0392B; border-radius: 50%;
+      position: absolute; top: 7px; right: 7px; border: 1.5px solid white;
+    }
+
+    .page-header {
+      display: flex; align-items: flex-end;
+      justify-content: space-between; margin-bottom: 32px;
+    }
+    .page-title { font-size: 22px; font-weight: 600; letter-spacing: -0.02em; }
+    .page-sub { font-size: 13px; color: var(--muted); margin-top: 4px; }
+    .page-date { font-family: 'DM Mono', monospace; font-size: 12px; color: var(--muted); }
+
+    /* ── VEÍCULOS ── */
+    .vehicles-row {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 14px;
+      margin-bottom: 28px;
+    }
+    .vehicle-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 18px 20px;
+      cursor: pointer;
+      transition: border-color 0.15s, box-shadow 0.15s;
+      position: relative;
+    }
+    .vehicle-card:hover { border-color: #ccc; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+    .vehicle-card.selected { border-color: var(--text); }
+    .vc-plate {
+      font-family: 'DM Mono', monospace;
+      font-size: 15px; font-weight: 500;
+      letter-spacing: 0.06em;
+      margin-bottom: 6px;
+    }
+    .vc-model { font-size: 13px; color: var(--text); margin-bottom: 2px; }
+    .vc-year  { font-size: 12px; color: var(--muted); }
+    .vc-status {
+      position: absolute; top: 16px; right: 16px;
+    }
+    .badge {
+      display: inline-flex; align-items: center;
+      font-size: 11.5px; font-weight: 500;
+      padding: 3px 9px; border-radius: 20px;
+    }
+    .badge.open  { background: var(--tag-open);  color: var(--tag-open-t); }
+    .badge.prog  { background: var(--tag-prog);  color: var(--tag-prog-t); }
+    .badge.done  { background: var(--tag-done);  color: var(--tag-done-t); }
+
+    .add-vehicle-card {
+      background: none;
+      border: 1px dashed var(--border);
+      border-radius: 12px;
+      padding: 18px 20px;
+      cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      gap: 8px;
+      color: var(--muted); font-size: 13px; font-weight: 500;
+      transition: border-color 0.15s, color 0.15s;
+    }
+    .add-vehicle-card:hover { border-color: var(--text); color: var(--text); }
+
+    /* ── TWO-COL ── */
+    .two-col { display: grid; grid-template-columns: 1fr 320px; gap: 20px; }
+
+    /* ── CARD ── */
+    .card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 12px; overflow: hidden;
+    }
+    .card-header {
+      padding: 18px 22px; border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .card-title { font-size: 14px; font-weight: 600; }
+    .card-action {
+      font-size: 12px; color: var(--muted); cursor: pointer;
+      font-weight: 500; border: none; background: none; font-family: inherit;
+    }
+    .card-action:hover { color: var(--text); }
+
+    /* ── TABS ── */
+    .tab-bar {
+      display: flex; border-bottom: 1px solid var(--border); padding: 0 22px;
+    }
+    .tab {
+      font-size: 13px; font-weight: 500; color: var(--muted);
+      padding: 12px 16px 11px;
+      border-bottom: 2px solid transparent;
+      cursor: pointer; background: none;
+      border-left: none; border-right: none; border-top: none;
+      font-family: inherit; transition: color 0.15s, border-color 0.15s;
+    }
+    .tab:hover { color: var(--text); }
+    .tab.active { color: var(--text); border-bottom-color: var(--text); }
+
+    /* ── OCORRÊNCIAS ── */
+    .occ-list { padding: 0; }
+    .occ-item {
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      align-items: start;
+      gap: 14px;
+      padding: 18px 22px;
+      border-bottom: 1px solid var(--border);
+      transition: background 0.1s;
+    }
+    .occ-item:last-child { border-bottom: none; }
+    .occ-item:hover { background: var(--bg); }
+    .occ-index {
+      font-family: 'DM Mono', monospace;
+      font-size: 11px; color: var(--muted);
+      background: var(--bg); border: 1px solid var(--border);
+      border-radius: 5px; padding: 3px 7px;
+      white-space: nowrap; margin-top: 1px;
+    }
+    .occ-body {}
+    .occ-component {
+      font-size: 13.5px; font-weight: 500; margin-bottom: 4px;
+    }
+    .occ-desc {
+      font-size: 13px; color: var(--muted); line-height: 1.5;
+    }
+    .occ-meta {
+      font-size: 11px; color: var(--muted);
+      font-family: 'DM Mono', monospace; margin-top: 6px;
+    }
+    .occ-right { text-align: right; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+
+    /* ── PROTOCOLO CARD ── */
+    .proto-list { padding: 0; }
+    .proto-item {
+      padding: 16px 22px;
+      border-bottom: 1px solid var(--border);
+      display: flex; justify-content: space-between; align-items: flex-start;
+      cursor: pointer; transition: background 0.1s;
+    }
+    .proto-item:last-child { border-bottom: none; }
+    .proto-item:hover { background: var(--bg); }
+    .proto-num {
+      font-family: 'DM Mono', monospace; font-size: 12px; color: var(--muted); margin-bottom: 4px;
+    }
+    .proto-desc { font-size: 13.5px; font-weight: 500; margin-bottom: 3px; }
+    .proto-date { font-size: 12px; color: var(--muted); }
+    .proto-arrow { color: var(--muted); margin-top: 2px; }
+
+    /* ── RIGHT COLUMN ── */
+    .right-col { display: flex; flex-direction: column; gap: 20px; }
+
+    /* detalhes do veículo */
+    .vi-body { padding: 18px 22px; display: flex; flex-direction: column; gap: 11px; }
+    .vi-row { display: flex; justify-content: space-between; align-items: center; }
+    .vi-key { font-size: 12px; color: var(--muted); font-weight: 500; }
+    .vi-val { font-size: 13px; font-weight: 500; }
+    .vi-val.mono { font-family: 'DM Mono', monospace; }
+    .vi-divider { height: 1px; background: var(--border); }
+
+    /* perfil do cliente */
+    .profile-body { padding: 18px 22px; display: flex; flex-direction: column; gap: 11px; }
+    .profile-avatar-row {
+      display: flex; align-items: center; gap: 14px;
+      padding-bottom: 14px; border-bottom: 1px solid var(--border);
+      margin-bottom: 2px;
+    }
+    .profile-avatar {
+      width: 44px; height: 44px; border-radius: 50%;
+      background: var(--text); color: #fff;
+      font-size: 16px; font-weight: 600;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .profile-name { font-size: 14px; font-weight: 600; }
+    .profile-since { font-size: 11px; color: var(--muted); font-family: 'DM Mono', monospace; }
+    .field-row { display: flex; flex-direction: column; gap: 3px; }
+    .field-label { font-size: 11px; color: var(--muted); font-weight: 500; letter-spacing: 0.04em; text-transform: uppercase; }
+    .field-value { font-size: 13px; }
+
+    .btn-ghost {
+      padding: 9px 14px; border-radius: 8px;
+      background: none; color: var(--text);
+      font-size: 13px; font-weight: 500; font-family: inherit;
+      border: 1px solid var(--border); cursor: pointer;
+      transition: background 0.15s; width: 100%; text-align: center;
+    }
+    .btn-ghost:hover { background: var(--bg); }
+
+    /* empty state */
+    .empty-state {
+      padding: 36px 22px; text-align: center;
+      color: var(--muted); font-size: 13px; line-height: 1.7;
+    }
+    .empty-icon { font-size: 26px; margin-bottom: 8px; }
+  </style>
+</head>
+<body>
+
+<!-- SIDEBAR -->
+<aside>
+  <div class="logo">
+    <div class="logo-mark">IMM</div>
+    <div class="logo-name">Integrated Mechanical<br>Management</div>
+  </div>
+
+  <nav>
+    <span class="nav-label">Principal</span>
+
+    <a class="nav-item active" href="#">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+      Meu Painel
+    </a>
+
+    <a class="nav-item" href="#">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 00-4 0v2M8 7V5a2 2 0 00-4 0v2"/><circle cx="12" cy="14" r="2"/></svg>
+      Meus Veículos
+    </a>
+
+    <a class="nav-item" href="#">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 12h6m-6 4h6M9 8h6M5 21h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>
+      Ocorrências
+    </a>
+
+    <span class="nav-label">Registros</span>
+
+    <a class="nav-item" href="#">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+      Histórico
+    </a>
+
+    <span class="nav-label">Conta</span>
+
+    <a class="nav-item" href="#">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
+      Meu Perfil
+    </a>
+
+    <a class="nav-item" href="#">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93A10 10 0 1 0 4.93 19.07 10 10 0 0 0 19.07 4.93z"/></svg>
+      Configurações
+    </a>
+  </nav>
+
+  <div class="sidebar-footer">
+    <div class="user-chip">
+      <div class="avatar">CS</div>
+      <div class="user-info">
+        <div class="user-name">Cláudia Souza</div>
+        <div class="user-role">Cliente</div>
+      </div>
+    </div>
+  </div>
+</aside>
+
+<!-- MAIN -->
+<main>
+
+  <!-- topbar -->
+  <div class="topbar">
+    <div class="notif-btn">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 01-3.46 0"/></svg>
+      <div class="notif-dot"></div>
+    </div>
+  </div>
+
+  <!-- header -->
+  <div class="page-header">
+    <div>
+      <div class="page-title">Olá, Cláudia</div>
+      <div class="page-sub">Acompanhe aqui os seus veículos e atendimentos.</div>
+    </div>
+    <div class="page-date">Quarta-feira, 13 mai 2026</div>
+  </div>
+
+  <!-- veículos -->
+  <div class="vehicles-row">
+
+    <div class="vehicle-card selected">
+      <div class="vc-status"><span class="badge prog">Em andamento</span></div>
+      <div class="vc-plate">GHI-9012</div>
+      <div class="vc-model">Honda Civic</div>
+      <div class="vc-year">2021 · Prata</div>
+    </div>
+
+    <div class="vehicle-card">
+      <div class="vc-status"><span class="badge done">Sem ocorrências</span></div>
+      <div class="vc-plate">VWX-4455</div>
+      <div class="vc-model">Volkswagen Polo</div>
+      <div class="vc-year">2023 · Branco</div>
+    </div>
+
+    <div class="add-vehicle-card">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+      Cadastrar veículo
+    </div>
+
+  </div>
+
+  <!-- two col -->
+  <div class="two-col">
+
+    <!-- LEFT -->
+    <div style="display:flex; flex-direction:column; gap:20px;">
+
+      <!-- Ocorrências do veículo -->
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <div class="card-title">Ocorrências — GHI-9012</div>
+          </div>
+          <span class="badge prog">Em andamento</span>
+        </div>
+
+        <div class="tab-bar">
+          <button class="tab active">Abertas</button>
+          <button class="tab">Todas</button>
+        </div>
+
+        <div class="occ-list">
+
+          <div class="occ-item">
+            <div class="occ-index">#OC-03</div>
+            <div class="occ-body">
+              <div class="occ-component">Embreagem</div>
+              <div class="occ-desc">Falha no acionamento da embreagem. Pedal com curso excessivo e dificuldade na troca de marchas em velocidades baixas.</div>
+              <div class="occ-meta">Registrado por Carlos Mendes · hoje, 09:42</div>
+            </div>
+            <div class="occ-right">
+              <span class="badge prog">Em andamento</span>
+            </div>
+          </div>
+
+          <div class="occ-item">
+            <div class="occ-index">#OC-02</div>
+            <div class="occ-body">
+              <div class="occ-component">Sistema elétrico</div>
+              <div class="occ-desc">Luz de check engine acionada. Possível falha no sensor de oxigênio traseiro.</div>
+              <div class="occ-meta">Registrado por Carlos Mendes · hoje, 09:15</div>
+            </div>
+            <div class="occ-right">
+              <span class="badge open">Aguardando peça</span>
+            </div>
+          </div>
+
+          <div class="occ-item">
+            <div class="occ-index">#OC-01</div>
+            <div class="occ-body">
+              <div class="occ-component">Suspensão traseira</div>
+              <div class="occ-desc">Barulho identificado ao passar em irregularidades. Amortecedores traseiros com desgaste acima do recomendado.</div>
+              <div class="occ-meta">Registrado por Fernanda Reis · ontem, 15:30</div>
+            </div>
+            <div class="occ-right">
+              <span class="badge done">Resolvido</span>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- Histórico de protocolos -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">Histórico de atendimentos</div>
+          <button class="card-action">Ver todos →</button>
+        </div>
+
+        <div class="proto-list">
+          <div class="proto-item">
+            <div>
+              <div class="proto-num">#20260430-11</div>
+              <div class="proto-desc">Troca de pastilhas de freio — GHI-9012</div>
+              <div class="proto-date">30 abr 2026 · Carlos Mendes</div>
+            </div>
+            <svg class="proto-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 18l6-6-6-6"/></svg>
+          </div>
+          <div class="proto-item">
+            <div>
+              <div class="proto-num">#20260318-05</div>
+              <div class="proto-desc">Revisão 30.000 km — GHI-9012</div>
+              <div class="proto-date">18 mar 2026 · Fernanda Reis</div>
+            </div>
+            <svg class="proto-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 18l6-6-6-6"/></svg>
+          </div>
+          <div class="proto-item">
+            <div>
+              <div class="proto-num">#20260201-09</div>
+              <div class="proto-desc">Substituição da correia dentada — GHI-9012</div>
+              <div class="proto-date">01 fev 2026 · Carlos Mendes</div>
+            </div>
+            <svg class="proto-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 18l6-6-6-6"/></svg>
+          </div>
+          <div class="proto-item">
+            <div>
+              <div class="proto-num">#20251108-14</div>
+              <div class="proto-desc">Troca de óleo e filtro — VWX-4455</div>
+              <div class="proto-date">08 nov 2025 · Carlos Mendes</div>
+            </div>
+            <svg class="proto-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 18l6-6-6-6"/></svg>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- RIGHT -->
+    <div class="right-col">
+
+      <!-- Detalhes do veículo selecionado -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">Detalhes do veículo</div>
+        </div>
+        <div class="vi-body">
+          <div class="vi-row">
+            <span class="vi-key">Placa</span>
+            <span class="vi-val mono">GHI-9012</span>
+          </div>
+          <div class="vi-divider"></div>
+          <div class="vi-row">
+            <span class="vi-key">Marca</span>
+            <span class="vi-val">Honda</span>
+          </div>
+          <div class="vi-row">
+            <span class="vi-key">Modelo</span>
+            <span class="vi-val">Civic</span>
+          </div>
+          <div class="vi-row">
+            <span class="vi-key">Ano</span>
+            <span class="vi-val">2021</span>
+          </div>
+          <div class="vi-row">
+            <span class="vi-key">Cor</span>
+            <span class="vi-val">Prata</span>
+          </div>
+          <div class="vi-divider"></div>
+          <div class="vi-row">
+            <span class="vi-key">Ocorrências abertas</span>
+            <span class="vi-val">2</span>
+          </div>
+          <div class="vi-row">
+            <span class="vi-key">Total de protocolos</span>
+            <span class="vi-val">3</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Perfil -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">Meu perfil</div>
+          <button class="card-action">Editar →</button>
+        </div>
+        <div class="profile-body">
+          <div class="profile-avatar-row">
+            <div class="profile-avatar">CS</div>
+            <div>
+              <div class="profile-name">Cláudia Souza</div>
+              <div class="profile-since">Cliente desde jan 2025</div>
+            </div>
+          </div>
+
+          <div class="field-row">
+            <span class="field-label">E-mail</span>
+            <span class="field-value">claudia.souza@email.com</span>
+          </div>
+          <div class="vi-divider"></div>
+          <div class="field-row">
+            <span class="field-label">Telefone</span>
+            <span class="field-value">(11) 98765-4321</span>
+          </div>
+          <div class="vi-divider"></div>
+          <div class="field-row">
+            <span class="field-label">Endereço</span>
+            <span class="field-value">Rua das Flores, 142 — Jundiaí, SP</span>
+          </div>
+          <div class="vi-divider"></div>
+          <div class="field-row">
+            <span class="field-label">CPF</span>
+            <span class="field-value" style="font-family:'DM Mono',monospace;font-size:12.5px;">•••.456.•••-89</span>
+          </div>
+        </div>
+        <div style="padding: 0 22px 18px;">
+          <button class="btn-ghost">Editar dados cadastrais</button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+</main>
+</body>
+</html>

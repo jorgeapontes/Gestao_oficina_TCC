@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>IMM – Meus Veículos</title>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #F5F4F2;
+      --surface:   #FFFFFF;
+      --border:    #E4E2DE;
+      --text:      #1A1917;
+      --muted:     #7A7872;
+      --tag-open:  #E8F2EC;
+      --tag-open-t:#2D7A4F;
+      --tag-prog:  #FEF4E4;
+      --tag-prog-t:#A05A00;
+      --tag-done:  #EDECEA;
+      --tag-done-t:#5A5750;
+      --sidebar-w: 230px;
+    }
+
+    body { font-family: 'DM Sans', sans-serif; background: var(--bg); color: var(--text); display: flex; min-height: 100vh; }
+
+    aside {
+      width: var(--sidebar-w); min-height: 100vh;
+      background: var(--surface); border-right: 1px solid var(--border);
+      display: flex; flex-direction: column; padding: 28px 0;
+      position: fixed; top: 0; left: 0;
+    }
+    .logo { padding: 0 24px 28px; border-bottom: 1px solid var(--border); }
+    .logo-mark { font-family: 'DM Mono', monospace; font-size: 13px; font-weight: 500; letter-spacing: 0.08em; color: var(--muted); text-transform: uppercase; margin-bottom: 4px; }
+    .logo-name { font-size: 15px; font-weight: 600; line-height: 1.3; }
+    nav { flex: 1; padding: 20px 12px; display: flex; flex-direction: column; gap: 2px; }
+    .nav-label { font-size: 10px; font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); padding: 14px 12px 6px; }
+    .nav-item { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 8px; font-size: 14px; color: var(--muted); cursor: pointer; text-decoration: none; transition: background 0.15s, color 0.15s; }
+    .nav-item:hover { background: var(--bg); color: var(--text); }
+    .nav-item.active { background: var(--text); color: #fff; }
+    .nav-item .icon { width: 18px; height: 18px; opacity: 0.7; flex-shrink: 0; }
+    .nav-item.active .icon { opacity: 1; }
+    .sidebar-footer { padding: 20px 24px 0; border-top: 1px solid var(--border); }
+    .user-chip { display: flex; align-items: center; gap: 10px; }
+    .avatar { width: 32px; height: 32px; border-radius: 50%; background: var(--text); color: #fff; font-size: 12px; font-weight: 600; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+    .user-name { font-size: 13px; font-weight: 500; }
+    .user-role { font-size: 11px; color: var(--muted); font-family: 'DM Mono', monospace; }
+
+    main { margin-left: var(--sidebar-w); flex: 1; padding: 40px 48px; }
+
+    .topbar { display: flex; align-items: center; justify-content: flex-end; gap: 12px; margin-bottom: 32px; }
+    .notif-btn { width: 36px; height: 36px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); display: flex; align-items: center; justify-content: center; cursor: pointer; position: relative; }
+    .notif-dot { width: 7px; height: 7px; background: #C0392B; border-radius: 50%; position: absolute; top: 7px; right: 7px; border: 1.5px solid white; }
+
+    .page-header { display: flex; align-items: flex-end; justify-content: space-between; margin-bottom: 28px; }
+    .page-title { font-size: 22px; font-weight: 600; letter-spacing: -0.02em; }
+    .page-sub { font-size: 13px; color: var(--muted); margin-top: 4px; }
+
+    .btn-primary {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 9px 18px; background: var(--text); color: #fff;
+      border: none; border-radius: 8px; font-family: inherit;
+      font-size: 13.5px; font-weight: 500; cursor: pointer;
+      transition: opacity 0.15s;
+    }
+    .btn-primary:hover { opacity: 0.85; }
+    .btn-primary svg { width: 15px; height: 15px; }
+
+    /* VEHICLE CARDS GRID */
+    .vehicles-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 16px;
+    }
+
+    .vehicle-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+      transition: border-color 0.15s;
+    }
+    .vehicle-card:hover { border-color: #C8C6C2; }
+
+    .vehicle-card-top {
+      padding: 20px 22px 16px;
+      border-bottom: 1px solid var(--border);
+    }
+    .vehicle-plate {
+      font-family: 'DM Mono', monospace;
+      font-size: 16px;
+      font-weight: 500;
+      letter-spacing: 0.06em;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      padding: 6px 12px;
+      display: inline-block;
+      margin-bottom: 12px;
+    }
+    .vehicle-name { font-size: 15px; font-weight: 600; margin-bottom: 2px; }
+    .vehicle-year { font-size: 12px; color: var(--muted); }
+
+    .vehicle-card-body { padding: 14px 22px; }
+    .vehicle-meta { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px; }
+    .meta-item label { display: block; font-size: 10.5px; color: var(--muted); font-weight: 500; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 3px; }
+    .meta-item span { font-size: 13px; font-weight: 500; }
+
+    .vehicle-status-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 14px;
+    }
+    .badge {
+      display: inline-flex; align-items: center;
+      font-size: 11.5px; font-weight: 500;
+      padding: 3px 9px; border-radius: 20px;
+    }
+    .badge.open  { background: var(--tag-open);  color: var(--tag-open-t); }
+    .badge.prog  { background: var(--tag-prog);  color: var(--tag-prog-t); }
+    .badge.done  { background: var(--tag-done);  color: var(--tag-done-t); }
+
+    .vehicle-actions { display: flex; gap: 8px; }
+    .btn-sm {
+      flex: 1; padding: 7px 12px;
+      border: 1px solid var(--border);
+      border-radius: 7px; background: transparent;
+      font-family: inherit; font-size: 12.5px; font-weight: 500;
+      color: var(--muted); cursor: pointer;
+      transition: border-color 0.15s, color 0.15s, background 0.15s;
+      text-align: center;
+    }
+    .btn-sm:hover { border-color: var(--text); color: var(--text); background: var(--bg); }
+    .btn-sm.danger:hover { border-color: #C0392B; color: #C0392B; background: #FEF0EE; }
+
+    /* ADD CARD */
+    .vehicle-card.add-card {
+      border-style: dashed;
+      display: flex; align-items: center; justify-content: center;
+      min-height: 200px;
+      cursor: pointer;
+    }
+    .vehicle-card.add-card:hover { background: #fafafa; border-color: var(--text); }
+    .add-card-inner { text-align: center; color: var(--muted); }
+    .add-card-inner svg { width: 28px; height: 28px; margin-bottom: 10px; opacity: 0.4; }
+    .add-card-label { font-size: 13.5px; font-weight: 500; color: var(--muted); }
+    .add-card-sub { font-size: 12px; color: var(--muted); opacity: 0.7; margin-top: 3px; }
+
+    /* MODAL */
+    .modal-backdrop {
+      position: fixed; inset: 0;
+      background: rgba(26,25,23,0.35);
+      display: flex; align-items: center; justify-content: center;
+      z-index: 100;
+      opacity: 0; pointer-events: none;
+      transition: opacity 0.2s;
+    }
+    .modal-backdrop.open { opacity: 1; pointer-events: all; }
+    .modal {
+      background: var(--surface);
+      border-radius: 14px;
+      width: 100%;
+      max-width: 460px;
+      padding: 28px 32px;
+      transform: translateY(10px);
+      transition: transform 0.2s;
+    }
+    .modal-backdrop.open .modal { transform: translateY(0); }
+    .modal-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; }
+    .modal-title { font-size: 16px; font-weight: 600; }
+    .modal-close { border: none; background: none; font-size: 20px; color: var(--muted); cursor: pointer; line-height: 1; padding: 2px 6px; border-radius: 6px; }
+    .modal-close:hover { background: var(--bg); color: var(--text); }
+
+    .field { margin-bottom: 16px; }
+    .field label { display: block; font-size: 12.5px; font-weight: 500; color: var(--muted); margin-bottom: 6px; letter-spacing: 0.02em; }
+    .field input, .field select {
+      width: 100%; border: 1px solid var(--border); border-radius: 8px;
+      padding: 10px 14px; font-size: 14px; font-family: inherit;
+      background: var(--surface); color: var(--text); outline: none;
+      transition: border-color 0.15s; -webkit-appearance: none;
+    }
+    .field input::placeholder { color: var(--muted); }
+    .field input:focus, .field select:focus { border-color: var(--text); }
+    .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .modal-footer { display: flex; gap: 10px; margin-top: 8px; }
+    .btn-cancel { flex: 1; padding: 10px 16px; border: 1px solid var(--border); border-radius: 8px; background: transparent; font-family: inherit; font-size: 14px; font-weight: 500; color: var(--muted); cursor: pointer; }
+    .btn-cancel:hover { color: var(--text); border-color: var(--text); }
+    .btn-confirm { flex: 2; padding: 10px 16px; background: var(--text); color: #fff; border: none; border-radius: 8px; font-family: inherit; font-size: 14px; font-weight: 500; cursor: pointer; }
+    .btn-confirm:hover { opacity: 0.85; }
+  </style>
+</head>
+<body>
+
+<aside>
+  <div class="logo">
+    <div class="logo-mark">IMM</div>
+    <div class="logo-name">Integrated Mechanical<br>Management</div>
+  </div>
+  <nav>
+    <span class="nav-label">Principal</span>
+    <a class="nav-item" href="imm-dashboard-cliente.html">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+      Meu Painel
+    </a>
+    <a class="nav-item active" href="#">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 00-4 0v2M8 7V5a2 2 0 00-4 0v2"/><circle cx="12" cy="14" r="2"/></svg>
+      Meus Veículos
+    </a>
+    <a class="nav-item" href="imm-ocorrencias-cliente.html">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 12h6m-6 4h6M9 8h6M5 21h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>
+      Ocorrências
+    </a>
+    <span class="nav-label">Registros</span>
+    <a class="nav-item" href="imm-historico.html">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+      Histórico
+    </a>
+    <span class="nav-label">Conta</span>
+    <a class="nav-item" href="imm-perfil.html">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
+      Meu Perfil
+    </a>
+    <a class="nav-item" href="imm-login.html">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg>
+      Sair
+    </a>
+  </nav>
+  <div class="sidebar-footer">
+    <div class="user-chip">
+      <div class="avatar">CS</div>
+      <div>
+        <div class="user-name">Cláudia Santos</div>
+        <div class="user-role">cliente</div>
+      </div>
+    </div>
+  </div>
+</aside>
+
+<main>
+  <div class="topbar">
+    <div class="notif-btn">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 01-3.46 0"/></svg>
+      <span class="notif-dot"></span>
+    </div>
+  </div>
+
+  <div class="page-header">
+    <div>
+      <div class="page-title">Meus Veículos</div>
+      <div class="page-sub">Gerencie os veículos vinculados à sua conta.</div>
+    </div>
+    <button class="btn-primary" onclick="openModal()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+      Novo veículo
+    </button>
+  </div>
+
+  <div class="vehicles-grid">
+
+    <!-- Vehicle 1 -->
+    <div class="vehicle-card">
+      <div class="vehicle-card-top">
+        <div class="vehicle-plate">ABC-1234</div>
+        <div class="vehicle-name">Toyota Corolla</div>
+        <div class="vehicle-year">2019 · Prata</div>
+      </div>
+      <div class="vehicle-card-body">
+        <div class="vehicle-meta">
+          <div class="meta-item"><label>Marca</label><span>Toyota</span></div>
+          <div class="meta-item"><label>Modelo</label><span>Corolla</span></div>
+          <div class="meta-item"><label>Ano</label><span>2019</span></div>
+          <div class="meta-item"><label>Cor</label><span>Prata</span></div>
+        </div>
+        <div class="vehicle-status-row">
+          <span class="badge prog">Em serviço</span>
+          <span style="font-size:12px;color:var(--muted);font-family:'DM Mono',monospace">2 ocorrências</span>
+        </div>
+        <div class="vehicle-actions">
+          <button class="btn-sm">Ver ocorrências</button>
+          <button class="btn-sm">Editar</button>
+          <button class="btn-sm danger">Remover</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Vehicle 2 -->
+    <div class="vehicle-card">
+      <div class="vehicle-card-top">
+        <div class="vehicle-plate">GHI-9012</div>
+        <div class="vehicle-name">Honda Civic</div>
+        <div class="vehicle-year">2021 · Preto</div>
+      </div>
+      <div class="vehicle-card-body">
+        <div class="vehicle-meta">
+          <div class="meta-item"><label>Marca</label><span>Honda</span></div>
+          <div class="meta-item"><label>Modelo</label><span>Civic</span></div>
+          <div class="meta-item"><label>Ano</label><span>2021</span></div>
+          <div class="meta-item"><label>Cor</label><span>Preto</span></div>
+        </div>
+        <div class="vehicle-status-row">
+          <span class="badge open">Aguardando</span>
+          <span style="font-size:12px;color:var(--muted);font-family:'DM Mono',monospace">1 ocorrência</span>
+        </div>
+        <div class="vehicle-actions">
+          <button class="btn-sm">Ver ocorrências</button>
+          <button class="btn-sm">Editar</button>
+          <button class="btn-sm danger">Remover</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Vehicle 3 - done -->
+    <div class="vehicle-card">
+      <div class="vehicle-card-top">
+        <div class="vehicle-plate">DEF-5678</div>
+        <div class="vehicle-name">Volkswagen Gol</div>
+        <div class="vehicle-year">2015 · Branco</div>
+      </div>
+      <div class="vehicle-card-body">
+        <div class="vehicle-meta">
+          <div class="meta-item"><label>Marca</label><span>Volkswagen</span></div>
+          <div class="meta-item"><label>Modelo</label><span>Gol</span></div>
+          <div class="meta-item"><label>Ano</label><span>2015</span></div>
+          <div class="meta-item"><label>Cor</label><span>Branco</span></div>
+        </div>
+        <div class="vehicle-status-row">
+          <span class="badge done">Sem pendências</span>
+          <span style="font-size:12px;color:var(--muted);font-family:'DM Mono',monospace">0 ocorrências</span>
+        </div>
+        <div class="vehicle-actions">
+          <button class="btn-sm">Ver ocorrências</button>
+          <button class="btn-sm">Editar</button>
+          <button class="btn-sm danger">Remover</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Add card -->
+    <div class="vehicle-card add-card" onclick="openModal()">
+      <div class="add-card-inner">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 5v14M5 12h14"/></svg>
+        <div class="add-card-label">Adicionar veículo</div>
+        <div class="add-card-sub">Placa, modelo, marca e ano</div>
+      </div>
+    </div>
+
+  </div>
+</main>
+
+<!-- MODAL CADASTRAR VEÍCULO -->
+<div class="modal-backdrop" id="modal" onclick="closeModalOutside(event)">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title">Cadastrar veículo</div>
+      <button class="modal-close" onclick="closeModal()">×</button>
+    </div>
+
+    <div class="field">
+      <label>Placa</label>
+      <input type="text" placeholder="ABC-1234" maxlength="8"/>
+    </div>
+    <div class="field-row">
+      <div class="field">
+        <label>Marca</label>
+        <select>
+          <option value="">Selecione</option>
+          <option>Toyota</option>
+          <option>Honda</option>
+          <option>Volkswagen</option>
+          <option>Chevrolet</option>
+          <option>Ford</option>
+          <option>Hyundai</option>
+          <option>Fiat</option>
+          <option>Renault</option>
+          <option>Nissan</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Modelo</label>
+        <input type="text" placeholder="Ex: Corolla"/>
+      </div>
+    </div>
+    <div class="field-row">
+      <div class="field">
+        <label>Ano</label>
+        <input type="number" placeholder="2020" min="1900" max="2026"/>
+      </div>
+      <div class="field">
+        <label>Cor</label>
+        <input type="text" placeholder="Ex: Prata"/>
+      </div>
+    </div>
+
+    <div class="modal-footer">
+      <button class="btn-cancel" onclick="closeModal()">Cancelar</button>
+      <button class="btn-confirm" onclick="closeModal()">Cadastrar veículo</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  function openModal() {
+    document.getElementById('modal').classList.add('open');
+  }
+  function closeModal() {
+    document.getElementById('modal').classList.remove('open');
+  }
+  function closeModalOutside(e) {
+    if (e.target === document.getElementById('modal')) closeModal();
+  }
+</script>
+</body>
+</html>

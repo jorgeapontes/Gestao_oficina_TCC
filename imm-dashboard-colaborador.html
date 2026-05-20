@@ -1,0 +1,631 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>IMM – Colaborador</title>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #F5F4F2;
+      --surface:   #FFFFFF;
+      --border:    #E4E2DE;
+      --text:      #1A1917;
+      --muted:     #7A7872;
+      --tag-open:  #E8F2EC;
+      --tag-open-t:#2D7A4F;
+      --tag-prog:  #FEF4E4;
+      --tag-prog-t:#A05A00;
+      --tag-done:  #EDECEA;
+      --tag-done-t:#5A5750;
+      --sidebar-w: 230px;
+    }
+
+    body {
+      font-family: 'DM Sans', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      display: flex;
+      min-height: 100vh;
+    }
+
+    /* ── SIDEBAR ── */
+    aside {
+      width: var(--sidebar-w);
+      min-height: 100vh;
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      padding: 28px 0;
+      position: fixed;
+      top: 0; left: 0;
+    }
+    .logo { padding: 0 24px 28px; border-bottom: 1px solid var(--border); }
+    .logo-mark {
+      font-family: 'DM Mono', monospace;
+      font-size: 13px; font-weight: 500;
+      letter-spacing: 0.08em; color: var(--muted);
+      text-transform: uppercase; margin-bottom: 4px;
+    }
+    .logo-name { font-size: 15px; font-weight: 600; line-height: 1.3; }
+
+    nav {
+      flex: 1; padding: 20px 12px;
+      display: flex; flex-direction: column; gap: 2px;
+    }
+    .nav-label {
+      font-size: 10px; font-weight: 500;
+      letter-spacing: 0.1em; text-transform: uppercase;
+      color: var(--muted); padding: 14px 12px 6px;
+    }
+    .nav-item {
+      display: flex; align-items: center; gap: 10px;
+      padding: 9px 12px; border-radius: 8px;
+      font-size: 14px; color: var(--muted);
+      cursor: pointer; text-decoration: none;
+      transition: background 0.15s, color 0.15s;
+    }
+    .nav-item:hover { background: var(--bg); color: var(--text); }
+    .nav-item.active { background: var(--text); color: #fff; }
+    .nav-item .icon { width: 18px; height: 18px; opacity: 0.7; flex-shrink: 0; }
+    .nav-item.active .icon { opacity: 1; }
+
+    .sidebar-footer { padding: 20px 24px 0; border-top: 1px solid var(--border); }
+    .user-chip { display: flex; align-items: center; gap: 10px; }
+    .avatar {
+      width: 32px; height: 32px; border-radius: 50%;
+      background: var(--text); color: #fff;
+      font-size: 12px; font-weight: 600;
+      display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+    }
+    .user-name { font-size: 13px; font-weight: 500; }
+    .user-role { font-size: 11px; color: var(--muted); font-family: 'DM Mono', monospace; }
+
+    /* ── MAIN ── */
+    main { margin-left: var(--sidebar-w); flex: 1; padding: 40px 48px; }
+
+    .topbar {
+      display: flex; align-items: center;
+      justify-content: flex-end; gap: 12px; margin-bottom: 32px;
+    }
+    .search-wrap { position: relative; flex: 1; max-width: 360px; }
+    .search-icon {
+      position: absolute; left: 12px; top: 50%;
+      transform: translateY(-50%); color: var(--muted); pointer-events: none;
+    }
+    .search-input {
+      width: 100%; border: 1px solid var(--border); border-radius: 8px;
+      padding: 9px 12px 9px 36px; font-size: 13.5px;
+      font-family: inherit; background: var(--surface); color: var(--text);
+      outline: none; transition: border-color 0.15s;
+    }
+    .search-input::placeholder { color: var(--muted); }
+    .search-input:focus { border-color: var(--text); }
+    .notif-btn {
+      width: 36px; height: 36px; border: 1px solid var(--border);
+      border-radius: 8px; background: var(--surface);
+      display: flex; align-items: center; justify-content: center;
+      cursor: pointer; position: relative;
+    }
+    .notif-dot {
+      width: 7px; height: 7px; background: #C0392B; border-radius: 50%;
+      position: absolute; top: 7px; right: 7px; border: 1.5px solid white;
+    }
+
+    .page-header {
+      display: flex; align-items: flex-end;
+      justify-content: space-between; margin-bottom: 32px;
+    }
+    .page-title { font-size: 22px; font-weight: 600; letter-spacing: -0.02em; }
+    .page-sub { font-size: 13px; color: var(--muted); margin-top: 4px; }
+    .page-date { font-family: 'DM Mono', monospace; font-size: 12px; color: var(--muted); }
+
+    /* ── STATS ── */
+    .stats-grid {
+      display: grid; grid-template-columns: repeat(3, 1fr);
+      gap: 16px; margin-bottom: 28px;
+    }
+    .stat-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 12px; padding: 20px 22px;
+    }
+    .stat-label { font-size: 12px; color: var(--muted); font-weight: 500; letter-spacing: 0.03em; margin-bottom: 10px; }
+    .stat-value { font-size: 30px; font-weight: 600; letter-spacing: -0.03em; line-height: 1; margin-bottom: 8px; }
+    .stat-delta { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 4px; }
+    .stat-delta.up { color: #2D7A4F; }
+
+    /* ── LAYOUT ── */
+    .two-col { display: grid; grid-template-columns: 1fr 320px; gap: 20px; }
+
+    /* ── CARD ── */
+    .card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 12px; overflow: hidden;
+    }
+    .card-header {
+      padding: 18px 22px; border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .card-title { font-size: 14px; font-weight: 600; }
+    .card-action {
+      font-size: 12px; color: var(--muted); cursor: pointer;
+      font-weight: 500; border: none; background: none; font-family: inherit;
+    }
+    .card-action:hover { color: var(--text); }
+
+    /* ── TABS ── */
+    .tab-bar {
+      display: flex; gap: 0;
+      border-bottom: 1px solid var(--border);
+      padding: 0 22px;
+    }
+    .tab {
+      font-size: 13px; font-weight: 500; color: var(--muted);
+      padding: 12px 16px 11px;
+      border-bottom: 2px solid transparent;
+      cursor: pointer; white-space: nowrap;
+      transition: color 0.15s, border-color 0.15s;
+      background: none; border-left: none; border-right: none; border-top: none;
+      font-family: inherit;
+    }
+    .tab:hover { color: var(--text); }
+    .tab.active { color: var(--text); border-bottom-color: var(--text); }
+
+    /* ── TABLE ── */
+    table { width: 100%; border-collapse: collapse; }
+    thead th {
+      text-align: left; font-size: 11px; font-weight: 500;
+      color: var(--muted); letter-spacing: 0.06em; text-transform: uppercase;
+      padding: 10px 22px; border-bottom: 1px solid var(--border);
+    }
+    tbody tr { transition: background 0.1s; }
+    tbody tr:hover { background: var(--bg); }
+    tbody td {
+      padding: 13px 22px; font-size: 13.5px;
+      border-bottom: 1px solid var(--border); vertical-align: middle;
+    }
+    tbody tr:last-child td { border-bottom: none; }
+
+    .td-plate {
+      font-family: 'DM Mono', monospace; font-size: 12.5px;
+      background: var(--bg); padding: 3px 8px;
+      border-radius: 5px; border: 1px solid var(--border); display: inline-block;
+    }
+    .td-proto {
+      font-family: 'DM Mono', monospace; font-size: 12px; color: var(--muted);
+    }
+    .badge {
+      display: inline-flex; align-items: center;
+      font-size: 11.5px; font-weight: 500;
+      padding: 3px 9px; border-radius: 20px;
+    }
+    .badge.open  { background: var(--tag-open);  color: var(--tag-open-t); }
+    .badge.prog  { background: var(--tag-prog);  color: var(--tag-prog-t); }
+    .badge.done  { background: var(--tag-done);  color: var(--tag-done-t); }
+
+    /* ── CLIENT SEARCH CARD ── */
+    .client-search {
+      padding: 16px 22px;
+      border-bottom: 1px solid var(--border);
+    }
+    .input-row { display: flex; gap: 8px; }
+    .field-input {
+      flex: 1; border: 1px solid var(--border); border-radius: 8px;
+      padding: 8px 12px; font-size: 13px; font-family: inherit;
+      background: var(--bg); color: var(--text); outline: none;
+      transition: border-color 0.15s;
+    }
+    .field-input:focus { border-color: var(--text); background: #fff; }
+    .field-input::placeholder { color: var(--muted); }
+    .btn-primary {
+      padding: 8px 16px; border-radius: 8px;
+      background: var(--text); color: #fff;
+      font-size: 13px; font-weight: 500; font-family: inherit;
+      border: none; cursor: pointer; white-space: nowrap;
+      transition: opacity 0.15s;
+    }
+    .btn-primary:hover { opacity: 0.82; }
+    .btn-ghost {
+      padding: 8px 14px; border-radius: 8px;
+      background: none; color: var(--text);
+      font-size: 13px; font-weight: 500; font-family: inherit;
+      border: 1px solid var(--border); cursor: pointer;
+      transition: background 0.15s;
+    }
+    .btn-ghost:hover { background: var(--bg); }
+
+    /* ── OCCURRENCE FORM ── */
+    .form-body { padding: 20px 22px; display: flex; flex-direction: column; gap: 14px; }
+    .form-group { display: flex; flex-direction: column; gap: 5px; }
+    .form-label { font-size: 12px; font-weight: 500; color: var(--muted); letter-spacing: 0.03em; }
+    .form-select {
+      border: 1px solid var(--border); border-radius: 8px;
+      padding: 9px 12px; font-size: 13.5px; font-family: inherit;
+      background: var(--bg); color: var(--text); outline: none;
+      transition: border-color 0.15s; cursor: pointer;
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%237A7872' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 12px center;
+      padding-right: 32px;
+    }
+    .form-select:focus { border-color: var(--text); background-color: #fff; }
+    .form-textarea {
+      border: 1px solid var(--border); border-radius: 8px;
+      padding: 10px 12px; font-size: 13.5px; font-family: inherit;
+      background: var(--bg); color: var(--text); outline: none;
+      resize: vertical; min-height: 90px; line-height: 1.5;
+      transition: border-color 0.15s;
+    }
+    .form-textarea:focus { border-color: var(--text); background: #fff; }
+    .form-textarea::placeholder { color: var(--muted); }
+    .form-footer {
+      padding: 0 22px 20px;
+      display: flex; gap: 8px; justify-content: flex-end;
+    }
+
+    /* ── RIGHT COLUMN ── */
+    .right-col { display: flex; flex-direction: column; gap: 20px; }
+
+    /* vehicle info */
+    .vehicle-info { padding: 18px 22px; display: flex; flex-direction: column; gap: 12px; }
+    .vi-row { display: flex; justify-content: space-between; align-items: center; }
+    .vi-key { font-size: 12px; color: var(--muted); font-weight: 500; }
+    .vi-val { font-size: 13px; font-weight: 500; }
+    .vi-val.mono { font-family: 'DM Mono', monospace; }
+    .vi-divider { height: 1px; background: var(--border); }
+
+    /* history mini */
+    .hist-list { padding: 0 22px; }
+    .hist-item {
+      display: flex; gap: 12px;
+      padding: 13px 0;
+      border-bottom: 1px solid var(--border);
+      align-items: flex-start;
+    }
+    .hist-item:last-child { border-bottom: none; }
+    .hist-badge {
+      font-family: 'DM Mono', monospace; font-size: 10.5px;
+      background: var(--bg); border: 1px solid var(--border);
+      border-radius: 5px; padding: 2px 6px;
+      white-space: nowrap; margin-top: 1px; flex-shrink: 0;
+    }
+    .hist-desc { font-size: 13px; line-height: 1.45; color: var(--text); }
+    .hist-date { font-size: 11px; color: var(--muted); font-family: 'DM Mono', monospace; margin-top: 2px; }
+
+    /* empty state */
+    .empty-state {
+      padding: 32px 22px; text-align: center;
+      color: var(--muted); font-size: 13px; line-height: 1.6;
+    }
+    .empty-icon { font-size: 28px; margin-bottom: 8px; }
+
+    /* section header row */
+    .section-row {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 16px;
+    }
+    .section-title { font-size: 14px; font-weight: 600; }
+  </style>
+</head>
+<body>
+
+<!-- SIDEBAR -->
+<aside>
+  <div class="logo">
+    <div class="logo-mark">IMM</div>
+    <div class="logo-name">Integrated Mechanical<br>Management</div>
+  </div>
+
+  <nav>
+    <span class="nav-label">Principal</span>
+
+    <a class="nav-item active" href="#">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+      Meu Painel
+    </a>
+
+    <a class="nav-item" href="#">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 12h6m-6 4h6M9 8h6M5 21h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>
+      Ocorrências
+    </a>
+
+    <a class="nav-item" href="#">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
+      Clientes
+    </a>
+
+    <a class="nav-item" href="#">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 00-4 0v2M8 7V5a2 2 0 00-4 0v2"/><circle cx="12" cy="14" r="2"/></svg>
+      Veículos
+    </a>
+
+    <span class="nav-label">Registros</span>
+
+    <a class="nav-item" href="#">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+      Histórico
+    </a>
+
+    <span class="nav-label">Conta</span>
+
+    <a class="nav-item" href="#">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93A10 10 0 1 0 4.93 19.07 10 10 0 0 0 19.07 4.93z"/></svg>
+      Configurações
+    </a>
+  </nav>
+
+  <div class="sidebar-footer">
+    <div class="user-chip">
+      <div class="avatar">CM</div>
+      <div class="user-info">
+        <div class="user-name">Carlos Mendes</div>
+        <div class="user-role">Mecânico · Colaborador</div>
+      </div>
+    </div>
+  </div>
+</aside>
+
+<!-- MAIN -->
+<main>
+
+  <!-- topbar -->
+  <div class="topbar">
+    <div class="search-wrap">
+      <svg class="search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+      <input class="search-input" type="text" placeholder="Buscar cliente, placa ou protocolo…"/>
+    </div>
+    <div class="notif-btn">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 01-3.46 0"/></svg>
+      <div class="notif-dot"></div>
+    </div>
+  </div>
+
+  <!-- header -->
+  <div class="page-header">
+    <div>
+      <div class="page-title">Meu Painel</div>
+      <div class="page-sub">Bom dia, Carlos. Você tem 3 atendimentos em aberto.</div>
+    </div>
+    <div class="page-date">Quarta-feira, 13 mai 2026</div>
+  </div>
+
+  <!-- stats -->
+  <div class="stats-grid">
+    <div class="stat-card">
+      <div class="stat-label">Meus atendimentos hoje</div>
+      <div class="stat-value">5</div>
+      <div class="stat-delta">3 em aberto · 2 finalizados</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Ocorrências registradas</div>
+      <div class="stat-value">11</div>
+      <div class="stat-delta up">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 15l-6-6-6 6"/></svg>
+        +4 esta semana
+      </div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Protocolos finalizados (mês)</div>
+      <div class="stat-value">38</div>
+      <div class="stat-delta">Maio de 2026</div>
+    </div>
+  </div>
+
+  <!-- two col -->
+  <div class="two-col">
+
+    <!-- LEFT: meus atendimentos + nova ocorrência -->
+    <div style="display:flex; flex-direction:column; gap:20px;">
+
+      <!-- Meus atendimentos -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">Meus atendimentos</div>
+          <button class="card-action">Ver histórico →</button>
+        </div>
+
+        <div class="tab-bar">
+          <button class="tab active">Em aberto</button>
+          <button class="tab">Em andamento</button>
+          <button class="tab">Finalizados hoje</button>
+        </div>
+
+        <table>
+          <thead>
+            <tr>
+              <th>Protocolo</th>
+              <th>Cliente</th>
+              <th>Veículo</th>
+              <th>Ocorrência</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="td-proto">#20260513-02</span></td>
+              <td>Bruno Leal</td>
+              <td><span class="td-plate">DEF-5678</span></td>
+              <td>Desgaste no freio dianteiro</td>
+              <td><span class="badge open">Aguardando peça</span></td>
+            </tr>
+            <tr>
+              <td><span class="td-proto">#20260513-03</span></td>
+              <td>Cláudia Souza</td>
+              <td><span class="td-plate">GHI-9012</span></td>
+              <td>Falha na embreagem</td>
+              <td><span class="badge prog">Em andamento</span></td>
+            </tr>
+            <tr>
+              <td><span class="td-proto">#20260513-07</span></td>
+              <td>Marcos Pinheiro</td>
+              <td><span class="td-plate">STU-2233</span></td>
+              <td>Barulho na suspensão traseira</td>
+              <td><span class="badge open">Aberto</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Registrar ocorrência -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">Registrar ocorrência</div>
+        </div>
+
+        <!-- busca de veículo -->
+        <div class="client-search">
+          <div class="form-label" style="margin-bottom:8px;">Localizar veículo</div>
+          <div class="input-row">
+            <input class="field-input" type="text" placeholder="Digite a placa ou CPF do cliente…"/>
+            <button class="btn-primary">Buscar</button>
+          </div>
+        </div>
+
+        <!-- formulário -->
+        <div class="form-body">
+          <div class="form-group">
+            <label class="form-label">Veículo selecionado</label>
+            <select class="form-select">
+              <option value="" disabled selected>— selecione após busca —</option>
+              <option>GHI-9012 · Honda Civic 2021 · Cláudia Souza</option>
+              <option>DEF-5678 · Toyota Corolla 2019 · Bruno Leal</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Componente afetado</label>
+            <select class="form-select">
+              <option value="" disabled selected>— selecione o componente —</option>
+              <option>Freios</option>
+              <option>Motor</option>
+              <option>Suspensão</option>
+              <option>Embreagem</option>
+              <option>Transmissão</option>
+              <option>Sistema elétrico</option>
+              <option>Outros</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Descrição do problema</label>
+            <textarea class="form-textarea" placeholder="Descreva o problema identificado, sintomas observados e condição do componente…"></textarea>
+          </div>
+        </div>
+        <div class="form-footer">
+          <button class="btn-ghost">Cancelar</button>
+          <button class="btn-primary">Registrar ocorrência</button>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- RIGHT -->
+    <div class="right-col">
+
+      <!-- Veículo em foco -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">Veículo em foco</div>
+          <button class="card-action">Editar →</button>
+        </div>
+        <div class="vehicle-info">
+          <div class="vi-row">
+            <span class="vi-key">Placa</span>
+            <span class="vi-val mono">GHI-9012</span>
+          </div>
+          <div class="vi-divider"></div>
+          <div class="vi-row">
+            <span class="vi-key">Modelo</span>
+            <span class="vi-val">Honda Civic</span>
+          </div>
+          <div class="vi-row">
+            <span class="vi-key">Ano</span>
+            <span class="vi-val">2021</span>
+          </div>
+          <div class="vi-row">
+            <span class="vi-key">Cor</span>
+            <span class="vi-val">Prata</span>
+          </div>
+          <div class="vi-divider"></div>
+          <div class="vi-row">
+            <span class="vi-key">Proprietário</span>
+            <span class="vi-val">Cláudia Souza</span>
+          </div>
+          <div class="vi-row">
+            <span class="vi-key">Contato</span>
+            <span class="vi-val mono" style="font-size:12px;">(11) 98765-4321</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Histórico do veículo -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">Histórico do veículo</div>
+          <button class="card-action">Ver tudo →</button>
+        </div>
+        <div class="hist-list">
+          <div class="hist-item">
+            <div>
+              <div class="hist-badge">#20260430-11</div>
+            </div>
+            <div>
+              <div class="hist-desc">Troca de pastilhas de freio dianteiras e traseiras</div>
+              <div class="hist-date">30 abr 2026</div>
+            </div>
+          </div>
+          <div class="hist-item">
+            <div>
+              <div class="hist-badge">#20260318-05</div>
+            </div>
+            <div>
+              <div class="hist-desc">Revisão de 30.000 km — troca de óleo e filtros</div>
+              <div class="hist-date">18 mar 2026</div>
+            </div>
+          </div>
+          <div class="hist-item">
+            <div>
+              <div class="hist-badge">#20260201-09</div>
+            </div>
+            <div>
+              <div class="hist-desc">Substituição da correia dentada</div>
+              <div class="hist-date">01 fev 2026</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Cadastrar veículo rápido -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">Cadastrar veículo</div>
+        </div>
+        <div class="form-body" style="gap:10px;">
+          <div class="form-group">
+            <label class="form-label">Placa</label>
+            <input class="field-input" type="text" placeholder="ABC-1234" style="background:#fff;"/>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Modelo</label>
+            <input class="field-input" type="text" placeholder="ex: Civic, Corolla…" style="background:#fff;"/>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Cliente proprietário</label>
+            <input class="field-input" type="text" placeholder="Buscar por nome ou CPF…" style="background:#fff;"/>
+          </div>
+        </div>
+        <div class="form-footer">
+          <button class="btn-primary" style="width:100%;">Cadastrar veículo</button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+</main>
+</body>
+</html>
