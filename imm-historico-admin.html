@@ -1,0 +1,780 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>IMM – Histórico de Atendimentos</title>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #F5F4F2;
+      --surface:   #FFFFFF;
+      --border:    #E4E2DE;
+      --text:      #1A1917;
+      --muted:     #7A7872;
+      --accent:    #1A1917;
+      --tag-open:  #E8F2EC;
+      --tag-open-t:#2D7A4F;
+      --tag-prog:  #FEF4E4;
+      --tag-prog-t:#A05A00;
+      --tag-done:  #EDECEA;
+      --tag-done-t:#5A5750;
+      --sidebar-w: 230px;
+    }
+
+    body {
+      font-family: 'DM Sans', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      display: flex;
+      min-height: 100vh;
+    }
+
+    /* ── SIDEBAR ── */
+    aside {
+      width: var(--sidebar-w);
+      min-height: 100vh;
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      padding: 28px 0;
+      position: fixed;
+      top: 0; left: 0;
+    }
+
+    .logo {
+      padding: 0 24px 28px;
+      border-bottom: 1px solid var(--border);
+    }
+    .logo-mark {
+      font-family: 'DM Mono', monospace;
+      font-size: 13px;
+      font-weight: 500;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+      text-transform: uppercase;
+      margin-bottom: 4px;
+    }
+    .logo-name {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--text);
+      line-height: 1.3;
+    }
+
+    nav {
+      flex: 1;
+      padding: 20px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .nav-label {
+      font-size: 10px;
+      font-weight: 500;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--muted);
+      padding: 14px 12px 6px;
+    }
+
+    .nav-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 9px 12px;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 400;
+      color: var(--muted);
+      cursor: pointer;
+      text-decoration: none;
+      transition: background 0.15s, color 0.15s;
+    }
+    .nav-item:hover { background: var(--bg); color: var(--text); }
+    .nav-item.active { background: var(--text); color: #fff; }
+    .nav-item .icon { width: 18px; height: 18px; opacity: 0.7; flex-shrink: 0; }
+    .nav-item.active .icon { opacity: 1; }
+
+    .sidebar-footer {
+      padding: 20px 24px 0;
+      border-top: 1px solid var(--border);
+    }
+    .user-chip { display: flex; align-items: center; gap: 10px; }
+    .avatar {
+      width: 32px; height: 32px;
+      border-radius: 50%;
+      background: var(--text);
+      color: #fff;
+      font-size: 12px;
+      font-weight: 600;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+    }
+    .user-info { min-width: 0; }
+    .user-name { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .user-role { font-size: 11px; color: var(--muted); font-family: 'DM Mono', monospace; }
+
+    /* ── MAIN ── */
+    main {
+      margin-left: var(--sidebar-w);
+      flex: 1;
+      padding: 40px 48px;
+      max-width: calc(100% - var(--sidebar-w));
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 12px;
+      margin-bottom: 32px;
+    }
+    .search-wrap {
+      position: relative;
+      flex: 1;
+      max-width: 360px;
+    }
+    .search-icon {
+      position: absolute;
+      left: 12px; top: 50%;
+      transform: translateY(-50%);
+      color: var(--muted);
+      pointer-events: none;
+    }
+    .search-input {
+      width: 100%;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 9px 12px 9px 36px;
+      font-size: 13.5px;
+      font-family: inherit;
+      background: var(--surface);
+      color: var(--text);
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    .search-input::placeholder { color: var(--muted); }
+    .search-input:focus { border-color: var(--text); }
+
+    .notif-btn {
+      width: 36px; height: 36px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface);
+      display: flex; align-items: center; justify-content: center;
+      cursor: pointer;
+      position: relative;
+    }
+    .notif-dot {
+      width: 7px; height: 7px;
+      background: #C0392B;
+      border-radius: 50%;
+      position: absolute;
+      top: 7px; right: 7px;
+      border: 1.5px solid white;
+    }
+
+    .page-header {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      margin-bottom: 28px;
+    }
+    .page-title { font-size: 22px; font-weight: 600; letter-spacing: -0.02em; }
+    .page-sub { font-size: 13px; color: var(--muted); margin-top: 4px; }
+    .page-date { font-family: 'DM Mono', monospace; font-size: 12px; color: var(--muted); }
+
+    /* ── FILTERS ── */
+    .filters-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+    }
+    .filter-select {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 12px;
+      font-size: 13px;
+      font-family: inherit;
+      background: var(--surface);
+      color: var(--text);
+      outline: none;
+      cursor: pointer;
+      transition: border-color 0.15s;
+      appearance: none;
+      padding-right: 28px;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%237A7872' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 10px center;
+    }
+    .filter-select:focus { border-color: var(--text); }
+
+    .filter-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 7px 12px;
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      font-size: 12.5px;
+      font-weight: 500;
+      color: var(--muted);
+      cursor: pointer;
+      background: var(--surface);
+      transition: all 0.15s;
+      user-select: none;
+    }
+    .filter-chip:hover { border-color: var(--text); color: var(--text); }
+    .filter-chip.active { background: var(--text); color: #fff; border-color: var(--text); }
+    .filter-chip .chip-dot {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: currentColor;
+      opacity: 0.6;
+    }
+
+    .filters-right {
+      margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .export-btn {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 14px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 500;
+      font-family: inherit;
+      background: var(--surface);
+      color: var(--text);
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .export-btn:hover { background: var(--bg); }
+
+    /* ── TABLE ── */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+    .card-header {
+      padding: 18px 22px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .card-title { font-size: 14px; font-weight: 600; }
+    .card-meta { font-size: 12px; color: var(--muted); font-family: 'DM Mono', monospace; }
+
+    table { width: 100%; border-collapse: collapse; }
+    thead th {
+      text-align: left;
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--muted);
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      padding: 10px 22px;
+      border-bottom: 1px solid var(--border);
+    }
+    tbody tr { transition: background 0.1s; cursor: pointer; }
+    tbody tr:hover { background: var(--bg); }
+    tbody td {
+      padding: 14px 22px;
+      font-size: 13.5px;
+      border-bottom: 1px solid var(--border);
+      vertical-align: middle;
+    }
+    tbody tr:last-child td { border-bottom: none; }
+
+    .td-proto {
+      font-family: 'DM Mono', monospace;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .td-plate {
+      font-family: 'DM Mono', monospace;
+      font-size: 12.5px;
+      background: var(--bg);
+      padding: 3px 8px;
+      border-radius: 5px;
+      border: 1px solid var(--border);
+      display: inline-block;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      font-size: 11.5px;
+      font-weight: 500;
+      padding: 3px 9px;
+      border-radius: 20px;
+    }
+    .badge.open  { background: var(--tag-open); color: var(--tag-open-t); }
+    .badge.prog  { background: var(--tag-prog); color: var(--tag-prog-t); }
+    .badge.done  { background: var(--tag-done); color: var(--tag-done-t); }
+
+    .td-action {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 12px;
+      color: var(--muted);
+      font-weight: 500;
+      padding: 5px 10px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--surface);
+      cursor: pointer;
+      transition: all 0.15s;
+      white-space: nowrap;
+    }
+    .td-action:hover { border-color: var(--text); color: var(--text); }
+
+    /* ── DETAIL PANEL ── */
+    .layout {
+      display: grid;
+      grid-template-columns: 1fr 320px;
+      gap: 20px;
+      align-items: start;
+    }
+
+    .detail-panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+      position: sticky;
+      top: 24px;
+    }
+    .detail-header {
+      padding: 18px 22px;
+      border-bottom: 1px solid var(--border);
+    }
+    .detail-proto {
+      font-family: 'DM Mono', monospace;
+      font-size: 11px;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+    .detail-title { font-size: 15px; font-weight: 600; }
+
+    .detail-body { padding: 20px 22px; display: flex; flex-direction: column; gap: 18px; }
+
+    .detail-section-label {
+      font-size: 10px;
+      font-weight: 500;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 10px;
+    }
+    .detail-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 13px;
+      padding: 6px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .detail-row:last-child { border-bottom: none; }
+    .detail-row-label { color: var(--muted); }
+    .detail-row-value { font-weight: 500; }
+    .detail-row-value.mono { font-family: 'DM Mono', monospace; font-size: 12px; }
+
+    .ocorrencia-item {
+      padding: 12px 14px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--bg);
+      font-size: 12.5px;
+      line-height: 1.5;
+      color: var(--text);
+    }
+    .ocorrencia-meta {
+      font-size: 11px;
+      color: var(--muted);
+      font-family: 'DM Mono', monospace;
+      margin-top: 6px;
+    }
+
+    .detail-footer {
+      padding: 16px 22px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      gap: 8px;
+    }
+    .btn-primary {
+      flex: 1;
+      padding: 9px 14px;
+      background: var(--text);
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 500;
+      font-family: inherit;
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+    .btn-primary:hover { opacity: 0.85; }
+    .btn-secondary {
+      padding: 9px 14px;
+      background: transparent;
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 500;
+      font-family: inherit;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .btn-secondary:hover { background: var(--bg); }
+
+    /* ── PAGINATION ── */
+    .pagination {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 22px;
+      border-top: 1px solid var(--border);
+    }
+    .pag-info { font-size: 12px; color: var(--muted); }
+    .pag-controls { display: flex; gap: 4px; }
+    .pag-btn {
+      width: 30px; height: 30px;
+      display: flex; align-items: center; justify-content: center;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      background: var(--surface);
+      color: var(--muted);
+      transition: all 0.15s;
+    }
+    .pag-btn:hover { border-color: var(--text); color: var(--text); }
+    .pag-btn.active { background: var(--text); color: #fff; border-color: var(--text); }
+
+    @media (max-width: 1200px) {
+      .layout { grid-template-columns: 1fr; }
+      .detail-panel { position: static; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- SIDEBAR -->
+<aside>
+  <div class="logo">
+    <div class="logo-mark">IMM</div>
+    <div class="logo-name">Integrated Mechanical<br>Management</div>
+  </div>
+
+  <nav>
+    <span class="nav-label">Principal</span>
+
+    <a class="nav-item" href="#">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+      Dashboard
+    </a>
+
+    <a class="nav-item" href="#">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 12h6m-6 4h6M9 8h6M5 21h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>
+      Ocorrências
+    </a>
+
+    <a class="nav-item" href="#">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
+      Clientes
+    </a>
+
+    <a class="nav-item" href="#">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 00-4 0v2M8 7V5a2 2 0 00-4 0v2"/><circle cx="12" cy="14" r="2"/></svg>
+      Veículos
+    </a>
+
+    <a class="nav-item" href="#">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg>
+      Colaboradores
+    </a>
+
+    <span class="nav-label">Registros</span>
+
+    <a class="nav-item active" href="#">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+      Histórico
+    </a>
+
+    <a class="nav-item" href="#">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 17v-2m3 2v-4m3 4v-6M3 20h18M5 20V10l7-7 7 7v10"/></svg>
+      Relatórios
+    </a>
+
+    <span class="nav-label">Sistema</span>
+
+    <a class="nav-item" href="#">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93A10 10 0 1 0 4.93 19.07 10 10 0 0 0 19.07 4.93z"/></svg>
+      Configurações
+    </a>
+  </nav>
+
+  <div class="sidebar-footer">
+    <div class="user-chip">
+      <div class="avatar">RC</div>
+      <div class="user-info">
+        <div class="user-name">Rafael Cardoso</div>
+        <div class="user-role">Administrador</div>
+      </div>
+    </div>
+  </div>
+</aside>
+
+<!-- MAIN -->
+<main>
+
+  <!-- topbar -->
+  <div class="topbar">
+    <div class="search-wrap">
+      <svg class="search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+      <input class="search-input" type="text" placeholder="Buscar por protocolo, cliente, placa…"/>
+    </div>
+    <div class="notif-btn">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 01-3.46 0"/></svg>
+      <div class="notif-dot"></div>
+    </div>
+  </div>
+
+  <!-- header -->
+  <div class="page-header">
+    <div>
+      <div class="page-title">Histórico de Atendimentos</div>
+      <div class="page-sub">Todos os protocolos finalizados — imutáveis e rastreáveis</div>
+    </div>
+    <div class="page-date">Quarta-feira, 13 mai 2026</div>
+  </div>
+
+  <!-- filters -->
+  <div class="filters-row">
+    <span class="filter-chip active"><span class="chip-dot"></span>Todos</span>
+    <span class="filter-chip"><span class="chip-dot"></span>Este mês</span>
+    <span class="filter-chip"><span class="chip-dot"></span>Últimos 3 meses</span>
+    <span class="filter-chip"><span class="chip-dot"></span>Este ano</span>
+
+    <select class="filter-select">
+      <option>Todos os colaboradores</option>
+      <option>Carlos Mendes</option>
+      <option>Fernanda Ribeiro</option>
+      <option>Patrícia Vieira</option>
+    </select>
+
+    <div class="filters-right">
+      <button class="export-btn">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+        Exportar CSV
+      </button>
+    </div>
+  </div>
+
+  <!-- layout with detail panel -->
+  <div class="layout">
+
+    <!-- table -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">Protocolos finalizados</div>
+        <div class="card-meta">1.034 registros</div>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Protocolo</th>
+            <th>Cliente</th>
+            <th>Veículo</th>
+            <th>Colaborador</th>
+            <th>Data</th>
+            <th>Ocorrências</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr style="background: var(--bg);">
+            <td><span class="td-proto">#20260513-05</span></td>
+            <td>Elisa Martins</td>
+            <td><span class="td-plate">MNO-7890</span></td>
+            <td>Fernanda R.</td>
+            <td><span style="font-size:12.5px;color:var(--muted);font-family:'DM Mono',monospace">13/05/2026</span></td>
+            <td><span style="font-size:12.5px">3 itens</span></td>
+            <td><span class="td-action">Ver detalhes →</span></td>
+          </tr>
+          <tr>
+            <td><span class="td-proto">#20260513-06</span></td>
+            <td>Felipe Rocha</td>
+            <td><span class="td-plate">PQR-1122</span></td>
+            <td>Carlos M.</td>
+            <td><span style="font-size:12.5px;color:var(--muted);font-family:'DM Mono',monospace">13/05/2026</span></td>
+            <td><span style="font-size:12.5px">1 item</span></td>
+            <td><span class="td-action">Ver detalhes →</span></td>
+          </tr>
+          <tr>
+            <td><span class="td-proto">#20260512-09</span></td>
+            <td>Gisele Ferreira</td>
+            <td><span class="td-plate">STU-3344</span></td>
+            <td>Patrícia V.</td>
+            <td><span style="font-size:12.5px;color:var(--muted);font-family:'DM Mono',monospace">12/05/2026</span></td>
+            <td><span style="font-size:12.5px">2 itens</span></td>
+            <td><span class="td-action">Ver detalhes →</span></td>
+          </tr>
+          <tr>
+            <td><span class="td-proto">#20260512-07</span></td>
+            <td>Hugo Almeida</td>
+            <td><span class="td-plate">VWX-5566</span></td>
+            <td>Carlos M.</td>
+            <td><span style="font-size:12.5px;color:var(--muted);font-family:'DM Mono',monospace">12/05/2026</span></td>
+            <td><span style="font-size:12.5px">4 itens</span></td>
+            <td><span class="td-action">Ver detalhes →</span></td>
+          </tr>
+          <tr>
+            <td><span class="td-proto">#20260511-04</span></td>
+            <td>Isabel Cunha</td>
+            <td><span class="td-plate">YZA-7788</span></td>
+            <td>Fernanda R.</td>
+            <td><span style="font-size:12.5px;color:var(--muted);font-family:'DM Mono',monospace">11/05/2026</span></td>
+            <td><span style="font-size:12.5px">2 itens</span></td>
+            <td><span class="td-action">Ver detalhes →</span></td>
+          </tr>
+          <tr>
+            <td><span class="td-proto">#20260511-02</span></td>
+            <td>João Pereira</td>
+            <td><span class="td-plate">BCD-9900</span></td>
+            <td>Carlos M.</td>
+            <td><span style="font-size:12.5px;color:var(--muted);font-family:'DM Mono',monospace">11/05/2026</span></td>
+            <td><span style="font-size:12.5px">5 itens</span></td>
+            <td><span class="td-action">Ver detalhes →</span></td>
+          </tr>
+          <tr>
+            <td><span class="td-proto">#20260510-08</span></td>
+            <td>Karen Lima</td>
+            <td><span class="td-plate">EFG-1234</span></td>
+            <td>Patrícia V.</td>
+            <td><span style="font-size:12.5px;color:var(--muted);font-family:'DM Mono',monospace">10/05/2026</span></td>
+            <td><span style="font-size:12.5px">1 item</span></td>
+            <td><span class="td-action">Ver detalhes →</span></td>
+          </tr>
+          <tr>
+            <td><span class="td-proto">#20260510-03</span></td>
+            <td>Lucas Barros</td>
+            <td><span class="td-plate">HIJ-5678</span></td>
+            <td>Fernanda R.</td>
+            <td><span style="font-size:12.5px;color:var(--muted);font-family:'DM Mono',monospace">10/05/2026</span></td>
+            <td><span style="font-size:12.5px">3 itens</span></td>
+            <td><span class="td-action">Ver detalhes →</span></td>
+          </tr>
+        </tbody>
+      </table>
+
+      <!-- pagination -->
+      <div class="pagination">
+        <div class="pag-info">Mostrando 1–8 de 1.034 protocolos</div>
+        <div class="pag-controls">
+          <div class="pag-btn">‹</div>
+          <div class="pag-btn active">1</div>
+          <div class="pag-btn">2</div>
+          <div class="pag-btn">3</div>
+          <div class="pag-btn" style="border:none;color:var(--muted);cursor:default">…</div>
+          <div class="pag-btn">130</div>
+          <div class="pag-btn">›</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- detail panel -->
+    <div class="detail-panel">
+      <div class="detail-header">
+        <div class="detail-proto">#20260513-05 · 13 mai 2026 às 14:32</div>
+        <div class="detail-title">Elisa Martins</div>
+        <div style="margin-top:8px"><span class="badge done">Finalizado</span></div>
+      </div>
+
+      <div class="detail-body">
+        <div>
+          <div class="detail-section-label">Veículo</div>
+          <div class="detail-row">
+            <span class="detail-row-label">Placa</span>
+            <span class="detail-row-value mono">MNO-7890</span>
+          </div>
+          <div class="detail-row">
+            <span class="detail-row-label">Modelo</span>
+            <span class="detail-row-value">Volkswagen Polo</span>
+          </div>
+          <div class="detail-row">
+            <span class="detail-row-label">Ano</span>
+            <span class="detail-row-value">2022</span>
+          </div>
+          <div class="detail-row">
+            <span class="detail-row-label">Cor</span>
+            <span class="detail-row-value">Branco</span>
+          </div>
+        </div>
+
+        <div>
+          <div class="detail-section-label">Colaborador responsável</div>
+          <div class="detail-row">
+            <span class="detail-row-label">Nome</span>
+            <span class="detail-row-value">Fernanda Ribeiro</span>
+          </div>
+          <div class="detail-row">
+            <span class="detail-row-label">Cargo</span>
+            <span class="detail-row-value">Mecânica</span>
+          </div>
+        </div>
+
+        <div>
+          <div class="detail-section-label">Ocorrências registradas (3)</div>
+          <div style="display:flex;flex-direction:column;gap:8px">
+            <div class="ocorrencia-item">
+              Pneu traseiro esquerdo com desgaste irregular — necessário substituição.
+              <div class="ocorrencia-meta">Item 1 · Fernanda R. · 13/05 11:04</div>
+            </div>
+            <div class="ocorrencia-item">
+              Pastilha de freio dianteira direita abaixo do nível mínimo.
+              <div class="ocorrencia-meta">Item 2 · Fernanda R. · 13/05 11:22</div>
+            </div>
+            <div class="ocorrencia-item">
+              Fluido de arrefecimento em nível baixo — reabastecido durante o atendimento.
+              <div class="ocorrencia-meta">Item 3 · Fernanda R. · 13/05 13:55</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="detail-footer">
+        <button class="btn-primary">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:inline;margin-right:5px;vertical-align:middle"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+          Exportar PDF
+        </button>
+        <button class="btn-secondary">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+        </button>
+      </div>
+    </div>
+
+  </div>
+
+</main>
+</body>
+</html>

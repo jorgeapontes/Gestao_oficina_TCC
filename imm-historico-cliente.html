@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>IMM – Meu Histórico</title>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #F5F4F2;
+      --surface:   #FFFFFF;
+      --border:    #E4E2DE;
+      --text:      #1A1917;
+      --muted:     #7A7872;
+      --accent:    #1A1917;
+      --tag-open:  #E8F2EC;
+      --tag-open-t:#2D7A4F;
+      --tag-prog:  #FEF4E4;
+      --tag-prog-t:#A05A00;
+      --tag-done:  #EDECEA;
+      --tag-done-t:#5A5750;
+      --sidebar-w: 230px;
+    }
+
+    body { font-family: 'DM Sans', sans-serif; background: var(--bg); color: var(--text); display: flex; min-height: 100vh; }
+
+    aside {
+      width: var(--sidebar-w); min-height: 100vh; background: var(--surface);
+      border-right: 1px solid var(--border); display: flex; flex-direction: column;
+      padding: 28px 0; position: fixed; top: 0; left: 0;
+    }
+    .logo { padding: 0 24px 28px; border-bottom: 1px solid var(--border); }
+    .logo-mark { font-family: 'DM Mono', monospace; font-size: 13px; font-weight: 500; letter-spacing: 0.08em; color: var(--muted); text-transform: uppercase; margin-bottom: 4px; }
+    .logo-name { font-size: 15px; font-weight: 600; color: var(--text); line-height: 1.3; }
+    nav { flex: 1; padding: 20px 12px; display: flex; flex-direction: column; gap: 2px; }
+    .nav-label { font-size: 10px; font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); padding: 14px 12px 6px; }
+    .nav-item { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 8px; font-size: 14px; font-weight: 400; color: var(--muted); cursor: pointer; text-decoration: none; transition: background 0.15s, color 0.15s; }
+    .nav-item:hover { background: var(--bg); color: var(--text); }
+    .nav-item.active { background: var(--text); color: #fff; }
+    .nav-item .icon { width: 18px; height: 18px; opacity: 0.7; flex-shrink: 0; }
+    .nav-item.active .icon { opacity: 1; }
+    .sidebar-footer { padding: 20px 24px 0; border-top: 1px solid var(--border); }
+    .user-chip { display: flex; align-items: center; gap: 10px; }
+    .avatar { width: 32px; height: 32px; border-radius: 50%; background: var(--text); color: #fff; font-size: 12px; font-weight: 600; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+    .user-info { min-width: 0; }
+    .user-name { font-size: 13px; font-weight: 500; }
+    .user-role { font-size: 11px; color: var(--muted); font-family: 'DM Mono', monospace; }
+
+    main { margin-left: var(--sidebar-w); flex: 1; padding: 40px 48px; max-width: calc(100% - var(--sidebar-w)); }
+
+    .topbar { display: flex; align-items: center; justify-content: flex-end; gap: 12px; margin-bottom: 32px; }
+    .notif-btn { width: 36px; height: 36px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); display: flex; align-items: center; justify-content: center; cursor: pointer; position: relative; }
+    .notif-dot { width: 7px; height: 7px; background: #C0392B; border-radius: 50%; position: absolute; top: 7px; right: 7px; border: 1.5px solid white; }
+
+    .page-header { display: flex; align-items: flex-end; justify-content: space-between; margin-bottom: 28px; }
+    .page-title { font-size: 22px; font-weight: 600; letter-spacing: -0.02em; }
+    .page-sub { font-size: 13px; color: var(--muted); margin-top: 4px; }
+    .page-date { font-family: 'DM Mono', monospace; font-size: 12px; color: var(--muted); }
+
+    /* vehicle selector */
+    .vehicle-tabs {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 24px;
+      flex-wrap: wrap;
+    }
+    .vtab {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      padding: 12px 16px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: var(--surface);
+      cursor: pointer;
+      transition: all 0.15s;
+      min-width: 130px;
+    }
+    .vtab:hover { border-color: var(--text); }
+    .vtab.active { border-color: var(--text); background: var(--text); color: #fff; }
+    .vtab-plate { font-family: 'DM Mono', monospace; font-size: 13px; font-weight: 500; }
+    .vtab-model { font-size: 11.5px; opacity: 0.7; }
+    .vtab-count { font-size: 11px; opacity: 0.6; margin-top: 2px; }
+
+    /* timeline */
+    .timeline { display: flex; flex-direction: column; gap: 0; }
+
+    .timeline-month {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 16px 0 10px;
+    }
+    .timeline-month-label {
+      font-size: 11px;
+      font-weight: 500;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+    .timeline-month-line { flex: 1; height: 1px; background: var(--border); }
+
+    .protocol-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+      margin-bottom: 12px;
+      transition: border-color 0.15s;
+      cursor: pointer;
+    }
+    .protocol-card:hover { border-color: #ccc; }
+    .protocol-card.expanded { border-color: var(--text); }
+
+    .protocol-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px 20px;
+    }
+    .protocol-left { display: flex; align-items: center; gap: 14px; }
+    .protocol-icon {
+      width: 36px; height: 36px;
+      border-radius: 8px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+    }
+    .protocol-proto {
+      font-family: 'DM Mono', monospace;
+      font-size: 11px;
+      color: var(--muted);
+      margin-bottom: 3px;
+    }
+    .protocol-date { font-size: 13.5px; font-weight: 500; }
+    .protocol-right { display: flex; align-items: center; gap: 12px; }
+    .protocol-items { font-size: 12px; color: var(--muted); }
+
+    .badge { display: inline-flex; align-items: center; font-size: 11.5px; font-weight: 500; padding: 3px 9px; border-radius: 20px; }
+    .badge.done { background: var(--tag-done); color: var(--tag-done-t); }
+
+    .chevron {
+      width: 16px; height: 16px;
+      color: var(--muted);
+      transition: transform 0.2s;
+    }
+    .protocol-card.expanded .chevron { transform: rotate(180deg); }
+
+    .protocol-body {
+      border-top: 1px solid var(--border);
+      padding: 18px 20px;
+      display: none;
+    }
+    .protocol-card.expanded .protocol-body { display: block; }
+
+    .ocor-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
+    .ocor-item {
+      display: flex;
+      gap: 12px;
+      padding: 12px 14px;
+      background: var(--bg);
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    .ocor-num {
+      font-family: 'DM Mono', monospace;
+      font-size: 11px;
+      color: var(--muted);
+      width: 18px;
+      flex-shrink: 0;
+      padding-top: 2px;
+    }
+
+    .protocol-meta-row {
+      display: flex;
+      gap: 24px;
+      padding-top: 14px;
+      border-top: 1px solid var(--border);
+      font-size: 12px;
+    }
+    .pmeta-item { display: flex; flex-direction: column; gap: 2px; }
+    .pmeta-label { color: var(--muted); }
+    .pmeta-value { font-weight: 500; }
+
+    .export-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 12px;
+      color: var(--muted);
+      text-decoration: none;
+      margin-left: auto;
+      padding: 4px 10px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .export-link:hover { color: var(--text); border-color: var(--text); }
+
+    .empty-state {
+      text-align: center;
+      padding: 60px 20px;
+      color: var(--muted);
+    }
+    .empty-state-icon { font-size: 36px; margin-bottom: 12px; }
+    .empty-state-title { font-size: 15px; font-weight: 500; color: var(--text); margin-bottom: 6px; }
+    .empty-state-sub { font-size: 13px; }
+  </style>
+</head>
+<body>
+
+<!-- SIDEBAR -->
+<aside>
+  <div class="logo">
+    <div class="logo-mark">IMM</div>
+    <div class="logo-name">Integrated Mechanical<br>Management</div>
+  </div>
+
+  <nav>
+    <span class="nav-label">Principal</span>
+    <a class="nav-item" href="#">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+      Meu Painel
+    </a>
+    <a class="nav-item" href="#">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 00-4 0v2M8 7V5a2 2 0 00-4 0v2"/><circle cx="12" cy="14" r="2"/></svg>
+      Meus Veículos
+    </a>
+    <a class="nav-item" href="#">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 12h6m-6 4h6M9 8h6M5 21h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>
+      Ocorrências
+    </a>
+
+    <span class="nav-label">Registros</span>
+    <a class="nav-item active" href="#">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+      Histórico
+    </a>
+
+    <span class="nav-label">Conta</span>
+    <a class="nav-item" href="#">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
+      Meu Perfil
+    </a>
+    <a class="nav-item" href="#">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93A10 10 0 1 0 4.93 19.07 10 10 0 0 0 19.07 4.93z"/></svg>
+      Configurações
+    </a>
+  </nav>
+
+  <div class="sidebar-footer">
+    <div class="user-chip">
+      <div class="avatar">CS</div>
+      <div class="user-info">
+        <div class="user-name">Cláudia Souza</div>
+        <div class="user-role">Cliente</div>
+      </div>
+    </div>
+  </div>
+</aside>
+
+<!-- MAIN -->
+<main>
+  <div class="topbar">
+    <div class="notif-btn">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 01-3.46 0"/></svg>
+      <div class="notif-dot"></div>
+    </div>
+  </div>
+
+  <div class="page-header">
+    <div>
+      <div class="page-title">Histórico de Atendimentos</div>
+      <div class="page-sub">Todos os protocolos finalizados dos seus veículos</div>
+    </div>
+    <div class="page-date">Quarta-feira, 13 mai 2026</div>
+  </div>
+
+  <!-- vehicle selector -->
+  <div class="vehicle-tabs">
+    <div class="vtab active">
+      <div class="vtab-plate">GHI-9012</div>
+      <div class="vtab-model">Honda Civic · 2021</div>
+      <div class="vtab-count">4 atendimentos</div>
+    </div>
+    <div class="vtab">
+      <div class="vtab-plate">LMN-4567</div>
+      <div class="vtab-model">Fiat Uno · 2018</div>
+      <div class="vtab-count">2 atendimentos</div>
+    </div>
+    <div class="vtab">
+      <div class="vtab-plate">Todos</div>
+      <div class="vtab-model">Todos os veículos</div>
+      <div class="vtab-count">6 atendimentos</div>
+    </div>
+  </div>
+
+  <!-- timeline -->
+  <div class="timeline">
+
+    <!-- May 2026 -->
+    <div class="timeline-month">
+      <div class="timeline-month-label">Maio 2026</div>
+      <div class="timeline-month-line"></div>
+    </div>
+
+    <div class="protocol-card expanded">
+      <div class="protocol-header" onclick="this.closest('.protocol-card').classList.toggle('expanded')">
+        <div class="protocol-left">
+          <div class="protocol-icon">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+          </div>
+          <div>
+            <div class="protocol-proto">#20260513-03</div>
+            <div class="protocol-date">13 de maio de 2026</div>
+          </div>
+        </div>
+        <div class="protocol-right">
+          <span class="protocol-items">3 ocorrências</span>
+          <span class="badge done">Finalizado</span>
+          <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+        </div>
+      </div>
+      <div class="protocol-body">
+        <div class="ocor-list">
+          <div class="ocor-item">
+            <div class="ocor-num">01</div>
+            <div>Revisão dos freios dianteiros — pastilhas substituídas dentro do prazo recomendado.</div>
+          </div>
+          <div class="ocor-item">
+            <div class="ocor-num">02</div>
+            <div>Troca do filtro de ar do motor — filtro original com 25.000 km de uso.</div>
+          </div>
+          <div class="ocor-item">
+            <div class="ocor-num">03</div>
+            <div>Alinhamento e balanceamento realizados — desgaste assimétrico identificado no pneu dianteiro direito.</div>
+          </div>
+        </div>
+        <div class="protocol-meta-row">
+          <div class="pmeta-item">
+            <div class="pmeta-label">Colaborador</div>
+            <div class="pmeta-value">Carlos Mendes</div>
+          </div>
+          <div class="pmeta-item">
+            <div class="pmeta-label">Veículo</div>
+            <div class="pmeta-value">GHI-9012 · Civic</div>
+          </div>
+          <div class="pmeta-item">
+            <div class="pmeta-label">Duração</div>
+            <div class="pmeta-value">3h 20min</div>
+          </div>
+          <a class="export-link">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+            PDF
+          </a>
+        </div>
+      </div>
+    </div>
+
+    <!-- February 2026 -->
+    <div class="timeline-month">
+      <div class="timeline-month-label">Fevereiro 2026</div>
+      <div class="timeline-month-line"></div>
+    </div>
+
+    <div class="protocol-card">
+      <div class="protocol-header" onclick="this.closest('.protocol-card').classList.toggle('expanded')">
+        <div class="protocol-left">
+          <div class="protocol-icon">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+          </div>
+          <div>
+            <div class="protocol-proto">#20260214-01</div>
+            <div class="protocol-date">14 de fevereiro de 2026</div>
+          </div>
+        </div>
+        <div class="protocol-right">
+          <span class="protocol-items">1 ocorrência</span>
+          <span class="badge done">Finalizado</span>
+          <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+        </div>
+      </div>
+      <div class="protocol-body">
+        <div class="ocor-list">
+          <div class="ocor-item">
+            <div class="ocor-num">01</div>
+            <div>Troca de óleo e filtro — óleo 5W30 sintético aplicado. Próxima troca em 10.000 km.</div>
+          </div>
+        </div>
+        <div class="protocol-meta-row">
+          <div class="pmeta-item">
+            <div class="pmeta-label">Colaborador</div>
+            <div class="pmeta-value">Fernanda Ribeiro</div>
+          </div>
+          <div class="pmeta-item">
+            <div class="pmeta-label">Veículo</div>
+            <div class="pmeta-value">GHI-9012 · Civic</div>
+          </div>
+          <div class="pmeta-item">
+            <div class="pmeta-label">Duração</div>
+            <div class="pmeta-value">45min</div>
+          </div>
+          <a class="export-link">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+            PDF
+          </a>
+        </div>
+      </div>
+    </div>
+
+    <!-- November 2025 -->
+    <div class="timeline-month">
+      <div class="timeline-month-label">Novembro 2025</div>
+      <div class="timeline-month-line"></div>
+    </div>
+
+    <div class="protocol-card">
+      <div class="protocol-header" onclick="this.closest('.protocol-card').classList.toggle('expanded')">
+        <div class="protocol-left">
+          <div class="protocol-icon">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+          </div>
+          <div>
+            <div class="protocol-proto">#20251108-06</div>
+            <div class="protocol-date">08 de novembro de 2025</div>
+          </div>
+        </div>
+        <div class="protocol-right">
+          <span class="protocol-items">2 ocorrências</span>
+          <span class="badge done">Finalizado</span>
+          <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+        </div>
+      </div>
+      <div class="protocol-body">
+        <div class="ocor-list">
+          <div class="ocor-item">
+            <div class="ocor-num">01</div>
+            <div>Bateria com carga abaixo do especificado — substituída por bateria 60Ah.</div>
+          </div>
+          <div class="ocor-item">
+            <div class="ocor-num">02</div>
+            <div>Verificação do sistema elétrico — alternador dentro das especificações.</div>
+          </div>
+        </div>
+        <div class="protocol-meta-row">
+          <div class="pmeta-item">
+            <div class="pmeta-label">Colaborador</div>
+            <div class="pmeta-value">Carlos Mendes</div>
+          </div>
+          <div class="pmeta-item">
+            <div class="pmeta-label">Veículo</div>
+            <div class="pmeta-value">GHI-9012 · Civic</div>
+          </div>
+          <div class="pmeta-item">
+            <div class="pmeta-label">Duração</div>
+            <div class="pmeta-value">1h 10min</div>
+          </div>
+          <a class="export-link">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+            PDF
+          </a>
+        </div>
+      </div>
+    </div>
+
+    <div class="protocol-card">
+      <div class="protocol-header" onclick="this.closest('.protocol-card').classList.toggle('expanded')">
+        <div class="protocol-left">
+          <div class="protocol-icon">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+          </div>
+          <div>
+            <div class="protocol-proto">#20251102-02</div>
+            <div class="protocol-date">02 de novembro de 2025</div>
+          </div>
+        </div>
+        <div class="protocol-right">
+          <span class="protocol-items">1 ocorrência</span>
+          <span class="badge done">Finalizado</span>
+          <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+        </div>
+      </div>
+      <div class="protocol-body">
+        <div class="ocor-list">
+          <div class="ocor-item">
+            <div class="ocor-num">01</div>
+            <div>Revisão geral de 30.000 km — todos os sistemas verificados e dentro dos parâmetros.</div>
+          </div>
+        </div>
+        <div class="protocol-meta-row">
+          <div class="pmeta-item">
+            <div class="pmeta-label">Colaborador</div>
+            <div class="pmeta-value">Patrícia Vieira</div>
+          </div>
+          <div class="pmeta-item">
+            <div class="pmeta-label">Veículo</div>
+            <div class="pmeta-value">GHI-9012 · Civic</div>
+          </div>
+          <div class="pmeta-item">
+            <div class="pmeta-label">Duração</div>
+            <div class="pmeta-value">2h 50min</div>
+          </div>
+          <a class="export-link">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+            PDF
+          </a>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</main>
+</body>
+</html>
