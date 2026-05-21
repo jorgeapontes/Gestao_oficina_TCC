@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>IMM – Registrar Ocorrência</title>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #F5F4F2; --surface: #FFFFFF; --border: #E4E2DE;
+      --text: #1A1917; --muted: #7A7872; --sidebar-w: 230px;
+      --tag-open: #E8F2EC; --tag-open-t: #2D7A4F;
+      --tag-prog: #FEF4E4; --tag-prog-t: #A05A00;
+      --tag-done: #EDECEA; --tag-done-t: #5A5750;
+    }
+    body { font-family: 'DM Sans', sans-serif; background: var(--bg); color: var(--text); display: flex; min-height: 100vh; }
+    aside { width: var(--sidebar-w); min-height: 100vh; background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; padding: 28px 0; position: fixed; top: 0; left: 0; }
+    .logo { padding: 0 24px 28px; border-bottom: 1px solid var(--border); }
+    .logo-mark { font-family: 'DM Mono', monospace; font-size: 13px; font-weight: 500; letter-spacing: 0.08em; color: var(--muted); text-transform: uppercase; margin-bottom: 4px; }
+    .logo-name { font-size: 15px; font-weight: 600; line-height: 1.3; }
+    nav { flex: 1; padding: 20px 12px; display: flex; flex-direction: column; gap: 2px; }
+    .nav-label { font-size: 10px; font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); padding: 14px 12px 6px; }
+    .nav-item { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 8px; font-size: 14px; color: var(--muted); cursor: pointer; text-decoration: none; transition: background 0.15s, color 0.15s; }
+    .nav-item:hover { background: var(--bg); color: var(--text); }
+    .nav-item.active { background: var(--text); color: #fff; }
+    .nav-item .icon { width: 18px; height: 18px; opacity: 0.7; flex-shrink: 0; }
+    .nav-item.active .icon { opacity: 1; }
+    .sidebar-footer { padding: 20px 24px 0; border-top: 1px solid var(--border); }
+    .user-chip { display: flex; align-items: center; gap: 10px; }
+    .avatar { width: 32px; height: 32px; border-radius: 50%; background: var(--text); color: #fff; font-size: 12px; font-weight: 600; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+    .user-name { font-size: 13px; font-weight: 500; }
+    .user-role { font-size: 11px; color: var(--muted); font-family: 'DM Mono', monospace; }
+    main { margin-left: var(--sidebar-w); flex: 1; padding: 40px 48px; }
+    .topbar { display: flex; align-items: center; justify-content: flex-end; gap: 12px; margin-bottom: 32px; }
+    .search-wrap { position: relative; flex: 1; max-width: 360px; }
+    .search-icon { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--muted); pointer-events: none; }
+    .search-input { width: 100%; border: 1px solid var(--border); border-radius: 8px; padding: 9px 12px 9px 36px; font-size: 13.5px; font-family: inherit; background: var(--surface); color: var(--text); outline: none; transition: border-color 0.15s; }
+    .search-input::placeholder { color: var(--muted); }
+    .search-input:focus { border-color: var(--text); }
+    .notif-btn { width: 36px; height: 36px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); display: flex; align-items: center; justify-content: center; cursor: pointer; position: relative; }
+    .notif-dot { width: 7px; height: 7px; background: #C0392B; border-radius: 50%; position: absolute; top: 7px; right: 7px; border: 1.5px solid white; }
+
+    .page-title { font-size: 22px; font-weight: 600; letter-spacing: -0.02em; margin-bottom: 6px; }
+    .page-sub { font-size: 13px; color: var(--muted); margin-bottom: 32px; }
+
+    .two-col { display: grid; grid-template-columns: 1fr 360px; gap: 24px; align-items: start; }
+
+    /* FORM CARD */
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+    .card-header { padding: 18px 22px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
+    .card-title { font-size: 14px; font-weight: 600; }
+
+    .form-body { padding: 22px; display: flex; flex-direction: column; gap: 16px; }
+    .field { display: flex; flex-direction: column; gap: 6px; }
+    .field label { font-size: 12.5px; font-weight: 500; color: var(--muted); letter-spacing: 0.02em; }
+    .field input, .field select, .field textarea {
+      width: 100%; border: 1px solid var(--border); border-radius: 8px;
+      padding: 10px 14px; font-size: 13.5px; font-family: inherit;
+      background: var(--surface); color: var(--text); outline: none;
+      transition: border-color 0.15s; -webkit-appearance: none;
+    }
+    .field input::placeholder, .field textarea::placeholder { color: var(--muted); }
+    .field input:focus, .field select:focus, .field textarea:focus { border-color: var(--text); }
+    .field input[readonly] { background: var(--bg); }
+    .field textarea { resize: vertical; min-height: 90px; }
+    .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+    /* VEHICLE FOUND */
+    .vehicle-found {
+      border: 1px solid var(--border); border-radius: 8px;
+      padding: 14px 16px; background: var(--bg);
+      display: flex; align-items: center; gap: 14px;
+      display: none;
+    }
+    .vehicle-found.show { display: flex; }
+    .vf-plate { font-family: 'DM Mono', monospace; font-size: 13px; font-weight: 500; background: var(--surface); border: 1px solid var(--border); border-radius: 5px; padding: 4px 10px; }
+    .vf-info { flex: 1; }
+    .vf-name { font-size: 13.5px; font-weight: 600; }
+    .vf-client { font-size: 12px; color: var(--muted); margin-top: 2px; }
+    .vf-badge { font-size: 11.5px; font-weight: 500; padding: 3px 9px; border-radius: 20px; background: var(--tag-open); color: var(--tag-open-t); }
+
+    /* ITEMS */
+    .items-section { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+    .items-header { padding: 12px 16px; background: var(--bg); border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
+    .items-label { font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.07em; }
+    .btn-add-item { display: flex; align-items: center; gap: 5px; border: none; background: none; font-family: inherit; font-size: 12.5px; font-weight: 500; color: var(--muted); cursor: pointer; }
+    .btn-add-item:hover { color: var(--text); }
+    .items-list { padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+    .item-row { display: flex; align-items: flex-start; gap: 8px; }
+    .item-num { font-family: 'DM Mono', monospace; font-size: 11px; color: var(--muted); padding-top: 11px; width: 24px; flex-shrink: 0; }
+    .item-input { flex: 1; border: 1px solid var(--border); border-radius: 7px; padding: 9px 12px; font-size: 13px; font-family: inherit; background: var(--surface); color: var(--text); outline: none; resize: none; min-height: 40px; transition: border-color 0.15s; }
+    .item-input::placeholder { color: var(--muted); }
+    .item-input:focus { border-color: var(--text); }
+    .btn-remove-item { width: 28px; height: 28px; border: 1px solid var(--border); border-radius: 6px; background: transparent; display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--muted); margin-top: 6px; flex-shrink: 0; }
+    .btn-remove-item:hover { border-color: #C0392B; color: #C0392B; }
+
+    .form-actions { padding: 18px 22px; border-top: 1px solid var(--border); display: flex; gap: 10px; justify-content: flex-end; }
+    .btn-primary { padding: 9px 20px; background: var(--text); color: #fff; border: none; border-radius: 8px; font-family: inherit; font-size: 13.5px; font-weight: 500; cursor: pointer; transition: opacity 0.15s; }
+    .btn-primary:hover { opacity: 0.85; }
+    .btn-outline { padding: 9px 20px; background: transparent; color: var(--muted); border: 1px solid var(--border); border-radius: 8px; font-family: inherit; font-size: 13.5px; font-weight: 500; cursor: pointer; }
+    .btn-outline:hover { border-color: var(--text); color: var(--text); }
+
+    /* SIDE CARD */
+    .side-card { display: flex; flex-direction: column; gap: 16px; }
+    .info-list { padding: 18px 22px; display: flex; flex-direction: column; gap: 14px; }
+    .info-item label { font-size: 11px; color: var(--muted); font-weight: 500; text-transform: uppercase; letter-spacing: 0.06em; display: block; margin-bottom: 3px; }
+    .info-item span { font-size: 13.5px; font-weight: 500; }
+    .badge { display: inline-flex; align-items: center; font-size: 11.5px; font-weight: 500; padding: 3px 9px; border-radius: 20px; }
+    .badge.open { background: var(--tag-open); color: var(--tag-open-t); }
+    .badge.prog { background: var(--tag-prog); color: var(--tag-prog-t); }
+
+    /* SUCCESS */
+    .success-overlay {
+      display: none; position: fixed; inset: 0;
+      background: rgba(26,25,23,0.35);
+      align-items: center; justify-content: center; z-index: 100;
+    }
+    .success-overlay.show { display: flex; }
+    .success-modal { background: var(--surface); border-radius: 14px; padding: 40px 44px; text-align: center; max-width: 380px; }
+    .success-icon { font-size: 40px; margin-bottom: 16px; }
+    .success-title { font-size: 18px; font-weight: 600; margin-bottom: 8px; }
+    .success-sub { font-size: 13px; color: var(--muted); margin-bottom: 24px; }
+    .success-code { font-family: 'DM Mono', monospace; font-size: 22px; font-weight: 500; letter-spacing: 0.05em; margin-bottom: 24px; }
+  </style>
+</head>
+<body>
+
+<aside>
+  <div class="logo">
+    <div class="logo-mark">IMM</div>
+    <div class="logo-name">Integrated Mechanical<br>Management</div>
+  </div>
+  <nav>
+    <span class="nav-label">Principal</span>
+    <a class="nav-item" href="imm-dashboard-colaborador.html">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+      Meu Painel
+    </a>
+    <a class="nav-item active" href="#">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 12h6m-6 4h6M9 8h6M5 21h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>
+      Ocorrências
+    </a>
+    <a class="nav-item" href="imm-clientes.html">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
+      Clientes
+    </a>
+    <a class="nav-item" href="imm-veiculos-colab.html">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 00-4 0v2M8 7V5a2 2 0 00-4 0v2"/><circle cx="12" cy="14" r="2"/></svg>
+      Veículos
+    </a>
+    <span class="nav-label">Registros</span>
+    <a class="nav-item" href="imm-historico.html">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+      Histórico
+    </a>
+    <span class="nav-label">Conta</span>
+    <a class="nav-item" href="imm-login.html">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg>
+      Sair
+    </a>
+  </nav>
+  <div class="sidebar-footer">
+    <div class="user-chip">
+      <div class="avatar">CM</div>
+      <div>
+        <div class="user-name">Carlos Mendes</div>
+        <div class="user-role">colaborador</div>
+      </div>
+    </div>
+  </div>
+</aside>
+
+<main>
+  <div class="topbar">
+    <div class="search-wrap">
+      <svg class="search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+      <input class="search-input" type="text" placeholder="Buscar cliente, veículo, placa..."/>
+    </div>
+    <div class="notif-btn">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 01-3.46 0"/></svg>
+    </div>
+  </div>
+
+  <div class="page-title">Registrar Ocorrência</div>
+  <div class="page-sub">Registre os problemas identificados no veículo do cliente.</div>
+
+  <div class="two-col">
+
+    <!-- MAIN FORM -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">Nova ocorrência</div>
+      </div>
+      <div class="form-body">
+
+        <!-- VEHICLE LOOKUP -->
+        <div class="field">
+          <label>Placa do veículo</label>
+          <div style="display:flex;gap:8px;">
+            <input type="text" id="plate-input" placeholder="ABC-1234" maxlength="8" style="text-transform:uppercase;" oninput="this.value=this.value.toUpperCase()"/>
+            <button class="btn-primary" style="flex-shrink:0;padding:10px 16px;" onclick="lookupVehicle()">Buscar</button>
+          </div>
+        </div>
+
+        <div class="vehicle-found" id="vehicle-found">
+          <span class="vf-plate" id="vf-plate">-</span>
+          <div class="vf-info">
+            <div class="vf-name" id="vf-name">-</div>
+            <div class="vf-client" id="vf-client">-</div>
+          </div>
+          <span class="vf-badge">Encontrado</span>
+        </div>
+
+        <!-- ITEMS -->
+        <div>
+          <div style="font-size:12.5px;font-weight:500;color:var(--muted);margin-bottom:10px;">Itens da ocorrência</div>
+          <div class="items-section">
+            <div class="items-header">
+              <span class="items-label">Problemas identificados</span>
+              <button class="btn-add-item" onclick="addItem()">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
+                Adicionar item
+              </button>
+            </div>
+            <div class="items-list" id="items-list">
+              <div class="item-row" data-idx="1">
+                <span class="item-num">01</span>
+                <textarea class="item-input" placeholder="Descreva o problema ou componente afetado..." rows="2"></textarea>
+                <button class="btn-remove-item" onclick="removeItem(this)" title="Remover">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- NOTES -->
+        <div class="field">
+          <label>Observações gerais (opcional)</label>
+          <textarea placeholder="Informações adicionais, recomendações ao cliente..." rows="3"></textarea>
+        </div>
+
+      </div>
+      <div class="form-actions">
+        <button class="btn-outline">Cancelar</button>
+        <button class="btn-primary" onclick="submitOccurrence()">Registrar ocorrência</button>
+      </div>
+    </div>
+
+    <!-- SIDE INFO -->
+    <div class="side-card">
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">Dados do veículo</div>
+        </div>
+        <div class="info-list" id="side-info">
+          <div class="info-item"><label>Placa</label><span style="color:var(--muted)">—</span></div>
+          <div class="info-item"><label>Modelo</label><span style="color:var(--muted)">—</span></div>
+          <div class="info-item"><label>Marca</label><span style="color:var(--muted)">—</span></div>
+          <div class="info-item"><label>Ano</label><span style="color:var(--muted)">—</span></div>
+          <div class="info-item"><label>Cor</label><span style="color:var(--muted)">—</span></div>
+          <div class="info-item"><label>Proprietário</label><span style="color:var(--muted)">—</span></div>
+          <div class="info-item"><label>Status atual</label><span style="color:var(--muted)">—</span></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">Instruções</div>
+        </div>
+        <div style="padding:18px 22px;font-size:13px;color:var(--muted);line-height:1.6;">
+          <p style="margin-bottom:10px;">1. Busque o veículo pela placa para vinculá-lo à ocorrência.</p>
+          <p style="margin-bottom:10px;">2. Adicione um item por problema ou componente identificado.</p>
+          <p style="margin-bottom:10px;">3. Seja específico nas descrições para facilitar o orçamento.</p>
+          <p>4. Após registrar, o cliente será notificado automaticamente.</p>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</main>
+
+<!-- SUCCESS MODAL -->
+<div class="success-overlay" id="success-overlay">
+  <div class="success-modal">
+    <div class="success-icon">✅</div>
+    <div class="success-title">Ocorrência registrada</div>
+    <div class="success-sub">A ocorrência foi salva e o cliente foi notificado.</div>
+    <div class="success-code">#OCC-0047</div>
+    <button class="btn-primary" style="width:100%;" onclick="closeSuccess()">Registrar nova ocorrência</button>
+  </div>
+</div>
+
+<script>
+  const vehicles = {
+    'ABC-1234': { name: 'Toyota Corolla', brand: 'Toyota', year: '2019', color: 'Prata', client: 'Cláudia Santos', status: 'Em serviço' },
+    'GHI-9012': { name: 'Honda Civic',    brand: 'Honda',  year: '2021', color: 'Preto', client: 'Cláudia Santos', status: 'Aguardando' },
+    'DEF-5678': { name: 'Volkswagen Gol', brand: 'Volkswagen', year: '2015', color: 'Branco', client: 'Cláudia Santos', status: 'Sem pendências' },
+  };
+
+  function lookupVehicle() {
+    const plate = document.getElementById('plate-input').value.trim().toUpperCase();
+    const vf = document.getElementById('vehicle-found');
+    const v = vehicles[plate];
+    if (v) {
+      document.getElementById('vf-plate').textContent = plate;
+      document.getElementById('vf-name').textContent = v.name;
+      document.getElementById('vf-client').textContent = 'Proprietário: ' + v.client;
+      vf.classList.add('show');
+      // update side panel
+      const si = document.getElementById('side-info');
+      const vals = [plate, v.name.split(' ').slice(1).join(' '), v.brand, v.year, v.color, v.client, v.status];
+      si.querySelectorAll('.info-item span').forEach((s, i) => {
+        s.textContent = vals[i] || '—';
+        s.style.color = '';
+      });
+    } else {
+      vf.classList.remove('show');
+      alert('Veículo com placa "' + plate + '" não encontrado. Verifique a placa ou cadastre o veículo.');
+    }
+  }
+
+  let itemCount = 1;
+  function addItem() {
+    itemCount++;
+    const list = document.getElementById('items-list');
+    const row = document.createElement('div');
+    row.className = 'item-row';
+    row.innerHTML = `<span class="item-num">${String(itemCount).padStart(2,'0')}</span><textarea class="item-input" placeholder="Descreva o problema ou componente afetado..." rows="2"></textarea><button class="btn-remove-item" onclick="removeItem(this)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg></button>`;
+    list.appendChild(row);
+  }
+  function removeItem(btn) {
+    const list = document.getElementById('items-list');
+    if (list.children.length <= 1) return;
+    btn.closest('.item-row').remove();
+    list.querySelectorAll('.item-num').forEach((n, i) => n.textContent = String(i+1).padStart(2,'0'));
+    itemCount = list.children.length;
+  }
+  function submitOccurrence() {
+    document.getElementById('success-overlay').classList.add('show');
+  }
+  function closeSuccess() {
+    document.getElementById('success-overlay').classList.remove('show');
+    document.getElementById('plate-input').value = '';
+    document.getElementById('vehicle-found').classList.remove('show');
+    document.getElementById('items-list').innerHTML = `<div class="item-row"><span class="item-num">01</span><textarea class="item-input" placeholder="Descreva o problema ou componente afetado..." rows="2"></textarea><button class="btn-remove-item" onclick="removeItem(this)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg></button></div>`;
+    itemCount = 1;
+  }
+  document.getElementById('plate-input').addEventListener('keypress', e => { if (e.key === 'Enter') lookupVehicle(); });
+</script>
+</body>
+</html>
