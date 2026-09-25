@@ -10,27 +10,88 @@ $erroLogin = '';
 $erroCad   = '';
 $old       = [];
 
+// PRG (Post/Redirect/Get): quando login ou cadastro falham, os dados abaixo são
+// guardados na sessão e a página é recarregada via redirect (GET). Isso evita o
+// aviso do navegador "Confirmar reenvio do formulário" ao atualizar a página.
+if (!empty($_SESSION['_auth_flash'])) {
+    $flash = $_SESSION['_auth_flash'];
+    unset($_SESSION['_auth_flash']);
+    $aba = $flash['aba'] ?? $aba;
+    $old = $flash['old'] ?? $old;
+    if ($aba === 'register') {
+        $erroCad = $flash['erro'] ?? '';
+    } else {
+        $erroLogin = $flash['erro'] ?? '';
+    }
+}
+
 // ─── LOGIN ───────────────────────────────────────────────────────────────────
 // Procura primeiro em colaborador (perfil COLABORADOR/ADMIN), depois em cliente.
+// O usuário pode entrar tanto com e-mail quanto com CPF (CPF só existe para clientes).
 if (acao() === 'login') {
-    $email = post('email');
-    $senha = $_POST['senha'] ?? '';
-    $old['login_email'] = $email;
+    $metodoLogin = post('login_metodo') === 'cpf' ? 'cpf' : 'email';
+    $senha       = $_POST['senha'] ?? '';
+    $old['login_metodo'] = $metodoLogin;
 
-    if ($email === '' || $senha === '') {
-        $erroLogin = 'Preencha todos os campos.';
+    if ($metodoLogin === 'cpf') {
+        $old['login_cpf'] = post('cpf');
+        $cpfLogin = so_digitos(post('cpf'));
+
+        if ($cpfLogin === '' || $senha === '') {
+            $erroLogin = 'Preencha todos os campos.';
+        } else {
+            $u = db_one("SELECT id, nome, email, senha, '' AS cargo, 'CLIENTE' AS perfil FROM cliente WHERE cpf = ?", [$cpfLogin]);
+            if ($u && password_verify($senha, $u['senha'])) {
+                session_regenerate_id(true);
+                unset($u['senha']);
+                $_SESSION['user'] = $u;
+                redirecionar(home_do_perfil($u['perfil']));
+            }
+            $erroLogin = 'CPF ou senha incorretos. Tente novamente.';
+        }
     } else {
-        $u = db_one('SELECT id, nome, email, senha, cargo, perfil FROM colaborador WHERE email = ?', [$email]);
-        if (!$u) {
-            $u = db_one("SELECT id, nome, email, senha, '' AS cargo, 'CLIENTE' AS perfil FROM cliente WHERE email = ?", [$email]);
+        $email = post('email');
+        $old['login_email'] = $email;
+
+        if ($email === '' || $senha === '') {
+            $erroLogin = 'Preencha todos os campos.';
+        } else {
+            $u = db_one('SELECT id, nome, email, senha, cargo, perfil FROM colaborador WHERE email = ?', [$email]);
+            if (!$u) {
+                $u = db_one("SELECT id, nome, email, senha, '' AS cargo, 'CLIENTE' AS perfil FROM cliente WHERE email = ?", [$email]);
+            }
+            if ($u && password_verify($senha, $u['senha'])) {
+                session_regenerate_id(true);
+                unset($u['senha']);
+                $_SESSION['user'] = $u;
+                redirecionar(home_do_perfil($u['perfil']));
+            }
+            $erroLogin = 'E-mail ou senha incorretos. Tente novamente.';
         }
-        if ($u && password_verify($senha, $u['senha'])) {
-            session_regenerate_id(true);
-            unset($u['senha']);
-            $_SESSION['user'] = $u;
-            redirecionar(home_do_perfil($u['perfil']));
+    }
+
+    if ($erroLogin !== '') {
+        $_SESSION['_auth_flash'] = ['aba' => 'login', 'erro' => $erroLogin, 'old' => $old];
+        redirecionar('login.php');
+    }
+}
+
+// Valida CPF pelo algoritmo oficial dos dígitos verificadores (módulo 11),
+// rejeitando também sequências de dígitos repetidos (ex.: 000.000.000-00).
+if (!function_exists('cpf_valido')) {
+    function cpf_valido(string $cpf): bool {
+        $cpf = preg_replace('/\D/', '', $cpf);
+        if (strlen($cpf) !== 11) return false;
+        if (preg_match('/^(\d)\1{10}$/', $cpf)) return false;
+        for ($t = 9; $t <= 10; $t++) {
+            $soma = 0;
+            for ($i = 0; $i < $t; $i++) {
+                $soma += (int)$cpf[$i] * (($t + 1) - $i);
+            }
+            $digito = (($soma * 10) % 11) % 10;
+            if ((int)$cpf[$t] !== $digito) return false;
         }
-        $erroLogin = 'E-mail ou senha incorretos. Tente novamente.';
+        return true;
     }
 }
 
@@ -39,17 +100,34 @@ if (acao() === 'cadastro') {
     $aba = 'register';
     $old = [
         'nome' => post('nome'), 'cpf' => post('cpf'), 'email' => post('email'),
-        'telefone' => post('telefone'), 'endereco' => post('endereco'),
+        'telefone' => post('telefone'),
+        'cep' => post('cep'), 'rua' => post('rua'), 'numero' => post('numero'),
+        'complemento' => post('complemento'), 'bairro' => post('bairro'), 'cidade' => post('cidade'),
     ];
-    $cpf   = so_digitos($old['cpf']);
+    $cpf = so_digitos($old['cpf']);
+    $cep = so_digitos($old['cep']);
     $senha = $_POST['senha'] ?? '';
 
-    if (!$old['nome'] || !$cpf || !$old['email'] || !$old['telefone'] || !$old['endereco'] || $senha === '') {
+    // Endereço completo é montado em uma única string para a coluna "endereco".
+    $cepFormatado = strlen($cep) === 8 ? substr($cep, 0, 5) . '-' . substr($cep, 5) : $old['cep'];
+    $enderecoPartes = array_filter([
+        trim($old['rua']) !== '' ? trim($old['rua']) . ', ' . trim($old['numero']) : '',
+        trim($old['complemento']),
+        trim($old['bairro']),
+        trim($old['cidade']),
+        $cepFormatado,
+    ], fn($parte) => $parte !== '');
+    $endereco = implode(' - ', $enderecoPartes);
+
+    if (!$old['nome'] || !$cpf || !$old['email'] || !$old['telefone'] || $senha === ''
+        || !$cep || !$old['rua'] || !$old['numero'] || !$old['bairro'] || !$old['cidade']) {
         $erroCad = 'Preencha todos os campos obrigatórios.';
-    } elseif (strlen($cpf) !== 11) {
-        $erroCad = 'CPF inválido: informe os 11 dígitos.';
+    } elseif (!cpf_valido($cpf)) {
+        $erroCad = 'CPF inválido';
     } elseif (!filter_var($old['email'], FILTER_VALIDATE_EMAIL)) {
         $erroCad = 'E-mail inválido.';
+    } elseif (strlen($cep) !== 8) {
+        $erroCad = 'CEP inválido: informe os 8 dígitos.';
     } elseif ($senha !== ($_POST['senha2'] ?? '')) {
         $erroCad = 'As senhas não conferem.';
     } elseif (strlen($senha) < 8) {
@@ -61,7 +139,7 @@ if (acao() === 'cadastro') {
             $id = uuid();
             db_exec('INSERT INTO cliente (id, nome, cpf, email, senha, telefone, endereco) VALUES (?,?,?,?,?,?,?)', [
                 $id, $old['nome'], $cpf, $old['email'], password_hash($senha, PASSWORD_DEFAULT),
-                so_digitos($old['telefone']), $old['endereco'],
+                so_digitos($old['telefone']), $endereco,
             ]);
             session_regenerate_id(true);
             $_SESSION['user'] = ['id' => $id, 'nome' => $old['nome'], 'email' => $old['email'], 'cargo' => '', 'perfil' => 'CLIENTE'];
@@ -70,6 +148,11 @@ if (acao() === 'cadastro') {
         } catch (mysqli_sql_exception $ex) {
             $erroCad = erro_db($ex);
         }
+    }
+
+    if ($erroCad !== '') {
+        $_SESSION['_auth_flash'] = ['aba' => 'register', 'erro' => $erroCad, 'old' => $old];
+        redirecionar('login.php');
     }
 }
 ?>
@@ -201,14 +284,33 @@ if (acao() === 'cadastro') {
 
     /* TABS */
     .tabs {
+      position: relative;
       display: flex;
       gap: 0;
       background: var(--bg);
+      border: 1px solid var(--border);
       border-radius: 10px;
       padding: 4px;
       margin-bottom: 36px;
     }
+    .tabs-slider {
+      position: absolute;
+      top: 4px;
+      left: 4px;
+      width: calc(50% - 4px);
+      height: calc(100% - 8px);
+      background: var(--surface);
+      border-radius: 7px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+      transition: transform 0.3s cubic-bezier(0.65, 0, 0.35, 1);
+      z-index: 0;
+    }
+    .tabs.tab-register .tabs-slider {
+      transform: translateX(100%);
+    }
     .tab-btn {
+      position: relative;
+      z-index: 1;
       flex: 1;
       padding: 9px 16px;
       border: none;
@@ -219,12 +321,10 @@ if (acao() === 'cadastro') {
       font-weight: 500;
       color: var(--muted);
       cursor: pointer;
-      transition: background 0.15s, color 0.15s;
+      transition: color 0.2s;
     }
     .tab-btn.active {
-      background: var(--surface);
       color: var(--text);
-      box-shadow: 0 1px 3px rgba(0,0,0,0.08);
     }
 
     /* FORM PANELS */
@@ -280,6 +380,12 @@ if (acao() === 'cadastro') {
       gap: 12px;
     }
 
+    .field-row-cep {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 12px;
+    }
+
     .error-msg {
       font-size: 12px;
       color: var(--error);
@@ -287,6 +393,69 @@ if (acao() === 'cadastro') {
       display: none;
     }
     .error-msg.visible { display: block; }
+
+    /* login method toggle (E-mail / CPF) */
+    .method-toggle {
+      position: relative;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 3px;
+      margin-bottom: 6px;
+      width: fit-content;
+    }
+    .method-slider {
+      position: absolute;
+      top: 3px;
+      left: 3px;
+      width: calc(50% - 3px);
+      height: calc(100% - 6px);
+      background: var(--surface);
+      border-radius: 5px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+      transition: transform 0.3s cubic-bezier(0.65, 0, 0.35, 1);
+      z-index: 0;
+    }
+    .method-toggle.method-cpf .method-slider {
+      transform: translateX(100%);
+    }
+    .method-btn {
+      position: relative;
+      z-index: 1;
+      padding: 5px 14px;
+      border: none;
+      border-radius: 6px;
+      background: transparent;
+      font-family: inherit;
+      font-size: 11.5px;
+      font-weight: 500;
+      color: var(--muted);
+      cursor: pointer;
+      transition: color 0.2s;
+    }
+    .method-btn.active {
+      color: var(--text);
+    }
+    .credential-field { display: none; }
+    .credential-field.active { display: block; }
+
+    .btn-secondary {
+      padding: 10px 18px;
+      background: var(--text);
+      color: #fff;
+      border: 1px solid var(--text);
+      border-radius: 8px;
+      font-family: inherit;
+      font-size: 12.5px;
+      font-weight: 500;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: opacity 0.15s;
+    }
+    .btn-secondary:hover { opacity: 0.85; }
+    .btn-secondary:disabled { opacity: 0.5; cursor: default; }
 
     .forgot-link {
       display: block;
@@ -406,7 +575,8 @@ if (acao() === 'cadastro') {
 <div class="right-panel">
   <div class="auth-box">
 
-    <div class="tabs">
+    <div class="tabs<?= $aba === 'register' ? ' tab-register' : '' ?>" id="tabs">
+      <div class="tabs-slider"></div>
       <button type="button" class="tab-btn<?= $aba === 'login' ? ' active' : '' ?>" onclick="showTab('login')">Entrar</button>
       <button type="button" class="tab-btn<?= $aba === 'register' ? ' active' : '' ?>" onclick="showTab('register')">Criar conta</button>
     </div>
@@ -422,9 +592,23 @@ if (acao() === 'cadastro') {
 
       <?php if ($erroLogin): ?><div class="alert error"><?= e($erroLogin) ?></div><?php endif; ?>
 
+      <?php $metodoAtual = ($old['login_metodo'] ?? 'email') === 'cpf' ? 'cpf' : 'email'; ?>
+      <input type="hidden" name="login_metodo" id="login-metodo" value="<?= e($metodoAtual) ?>"/>
+
       <div class="field">
-        <label>E-mail</label>
-        <input type="email" name="email" value="<?= e($old['login_email'] ?? '') ?>" placeholder="seu@email.com" required autofocus/>
+        <div class="method-toggle<?= $metodoAtual === 'cpf' ? ' method-cpf' : '' ?>" id="method-toggle">
+          <div class="method-slider"></div>
+          <button type="button" class="method-btn<?= $metodoAtual === 'email' ? ' active' : '' ?>" id="method-email-btn" onclick="showLoginMethod('email')">E-mail</button>
+          <button type="button" class="method-btn<?= $metodoAtual === 'cpf' ? ' active' : '' ?>" id="method-cpf-btn" onclick="showLoginMethod('cpf')">CPF</button>
+        </div>
+
+        <div class="credential-field<?= $metodoAtual === 'email' ? ' active' : '' ?>" id="login-field-email">
+          <input type="email" name="email" id="login-email" value="<?= e($old['login_email'] ?? '') ?>" placeholder="seu@email.com" <?= $metodoAtual === 'email' ? 'autofocus' : '' ?>/>
+        </div>
+        <div class="credential-field<?= $metodoAtual === 'cpf' ? ' active' : '' ?>" id="login-field-cpf">
+          <input type="text" name="cpf" id="login-cpf" value="<?= e($old['login_cpf'] ?? '') ?>" placeholder="000.000.000-00" maxlength="14" <?= $metodoAtual === 'cpf' ? 'autofocus' : '' ?>/>
+        </div>
+        <div class="form-sub" style="margin-top: 5px; font-size: 12px">Escolha qual dado utilizar para fazer login</div>
       </div>
       <div class="field">
         <label>Senha</label>
@@ -457,6 +641,7 @@ if (acao() === 'cadastro') {
         <div class="field">
           <label>CPF</label>
           <input type="text" name="cpf" id="reg-cpf" value="<?= e($old['cpf'] ?? '') ?>" placeholder="000.000.000-00" maxlength="14" required/>
+          <div class="error-msg" id="cpf-error-msg">CPF inválido</div>
         </div>
       </div>
 
@@ -471,8 +656,39 @@ if (acao() === 'cadastro') {
       </div>
 
       <div class="field">
-        <label>Endereço</label>
-        <input type="text" name="endereco" value="<?= e($old['endereco'] ?? '') ?>" placeholder="Rua, número, bairro, cidade" maxlength="100" required/>
+        <label>CEP</label>
+        <div class="field-row-cep">
+          <input type="text" name="cep" id="reg-cep" value="<?= e($old['cep'] ?? '') ?>" placeholder="00000-000" maxlength="9" required/>
+          <button type="button" class="btn-secondary" id="btn-buscar-cep" onclick="buscarCep()">Buscar CEP</button>
+        </div>
+        <div class="error-msg" id="cep-error-msg">CEP não encontrado.</div>
+      </div>
+
+      <div class="field">
+        <label>Rua</label>
+        <input type="text" name="rua" id="reg-rua" value="<?= e($old['rua'] ?? '') ?>" placeholder="Nome da rua" maxlength="120" required/>
+      </div>
+
+      <div class="field-row">
+        <div class="field">
+          <label>Número</label>
+          <input type="text" name="numero" id="reg-numero" value="<?= e($old['numero'] ?? '') ?>" placeholder="123" maxlength="10" required/>
+        </div>
+        <div class="field">
+          <label>Complemento</label>
+          <input type="text" name="complemento" id="reg-complemento" value="<?= e($old['complemento'] ?? '') ?>" placeholder="Apto, bloco... (opcional)" maxlength="60"/>
+        </div>
+      </div>
+
+      <div class="field-row">
+        <div class="field">
+          <label>Bairro</label>
+          <input type="text" name="bairro" id="reg-bairro" value="<?= e($old['bairro'] ?? '') ?>" placeholder="Bairro" maxlength="80" required/>
+        </div>
+        <div class="field">
+          <label>Cidade</label>
+          <input type="text" name="cidade" id="reg-cidade" value="<?= e($old['cidade'] ?? '') ?>" placeholder="Cidade" maxlength="80" required/>
+        </div>
       </div>
 
       <div class="field-row">
@@ -501,18 +717,40 @@ if (acao() === 'cadastro') {
     document.querySelectorAll('.tab-btn').forEach((b, i) => {
       b.classList.toggle('active', (tab === 'login' ? i === 0 : i === 1));
     });
+    document.getElementById('tabs').classList.toggle('tab-register', tab === 'register');
     document.querySelectorAll('.form-panel').forEach(p => p.classList.remove('active'));
     document.getElementById('panel-' + tab).classList.add('active');
   }
 
-  // CPF mask
-  document.getElementById('reg-cpf').addEventListener('input', function() {
-    let v = this.value.replace(/\D/g,'').substring(0, 11);
-    v = v.replace(/(\d{3})(\d)/,'$1.$2');
-    v = v.replace(/(\d{3})(\d)/,'$1.$2');
-    v = v.replace(/(\d{3})(\d{1,2})$/,'$1-$2');
-    this.value = v;
-  });
+  // Alterna entre login por E-mail ou por CPF
+  function showLoginMethod(metodo) {
+    document.getElementById('method-email-btn').classList.toggle('active', metodo === 'email');
+    document.getElementById('method-cpf-btn').classList.toggle('active', metodo === 'cpf');
+    document.getElementById('method-toggle').classList.toggle('method-cpf', metodo === 'cpf');
+    document.getElementById('login-field-email').classList.toggle('active', metodo === 'email');
+    document.getElementById('login-field-cpf').classList.toggle('active', metodo === 'cpf');
+    document.getElementById('login-metodo').value = metodo;
+
+    // Limpa o que foi digitado nos dois campos: evita que um valor incompleto
+    // deixado no campo escondido (ex.: e-mail inválido) bloqueie o envio do
+    // formulário quando o login é feito pelo outro campo.
+    document.getElementById('login-email').value = '';
+    document.getElementById('login-cpf').value = '';
+  }
+
+  // Aplica a máscara de CPF (000.000.000-00) a um campo, aceitando tanto
+  // dígitos puros quanto os caracteres já digitados pelo próprio usuário.
+  function maskCpfField(el) {
+    el.addEventListener('input', function() {
+      let v = this.value.replace(/\D/g,'').substring(0, 11);
+      v = v.replace(/(\d{3})(\d)/,'$1.$2');
+      v = v.replace(/(\d{3})(\d)/,'$1.$2');
+      v = v.replace(/(\d{3})(\d{1,2})$/,'$1-$2');
+      this.value = v;
+    });
+  }
+  maskCpfField(document.getElementById('reg-cpf'));
+  maskCpfField(document.getElementById('login-cpf'));
 
   // Telefone mask
   document.getElementById('reg-tel').addEventListener('input', function() {
@@ -521,6 +759,85 @@ if (acao() === 'cadastro') {
     else if (v.length > 6) v = v.replace(/(\d{2})(\d{4})(\d+)/, '($1) $2-$3');
     else if (v.length > 2) v = v.replace(/(\d{2})(\d+)/, '($1) $2');
     this.value = v;
+  });
+
+  // CEP mask (00000-000)
+  document.getElementById('reg-cep').addEventListener('input', function() {
+    let v = this.value.replace(/\D/g,'').substring(0, 8);
+    v = v.replace(/(\d{5})(\d)/,'$1-$2');
+    this.value = v;
+    document.getElementById('cep-error-msg').classList.remove('visible');
+  });
+
+  // Busca o CEP digitado e autocompleta Rua, Bairro e Cidade
+  function buscarCep() {
+    const cepInput = document.getElementById('reg-cep');
+    const cep = cepInput.value.replace(/\D/g,'');
+    const errorMsg = document.getElementById('cep-error-msg');
+    const btn = document.getElementById('btn-buscar-cep');
+    errorMsg.classList.remove('visible');
+
+    if (cep.length !== 8) {
+      errorMsg.textContent = 'Informe um CEP com 8 dígitos.';
+      errorMsg.classList.add('visible');
+      return;
+    }
+
+    btn.disabled = true;
+    const textoOriginal = btn.textContent;
+    btn.textContent = 'Buscando...';
+
+    fetch('https://viacep.com.br/ws/' + cep + '/json/')
+      .then(resp => resp.json())
+      .then(data => {
+        if (data.erro) {
+          errorMsg.textContent = 'CEP não encontrado.';
+          errorMsg.classList.add('visible');
+          return;
+        }
+        document.getElementById('reg-rua').value = data.logradouro || '';
+        document.getElementById('reg-bairro').value = data.bairro || '';
+        document.getElementById('reg-cidade').value = data.localidade || '';
+        if (data.logradouro) {
+          document.getElementById('reg-numero').focus();
+        }
+      })
+      .catch(() => {
+        errorMsg.textContent = 'Não foi possível buscar o CEP agora. Preencha manualmente.';
+        errorMsg.classList.add('visible');
+      })
+      .finally(() => {
+        btn.disabled = false;
+        btn.textContent = textoOriginal;
+      });
+  }
+
+  // Validação do CPF (dígitos verificadores) no navegador, para feedback imediato
+  function cpfValido(cpf) {
+    cpf = cpf.replace(/\D/g,'');
+    if (cpf.length !== 11 || /^(\d)\1{10}$/.test(cpf)) return false;
+    for (let t = 9; t <= 10; t++) {
+      let soma = 0;
+      for (let i = 0; i < t; i++) soma += parseInt(cpf.charAt(i), 10) * ((t + 1) - i);
+      const digito = ((soma * 10) % 11) % 10;
+      if (digito !== parseInt(cpf.charAt(t), 10)) return false;
+    }
+    return true;
+  }
+
+  // Impede o envio do cadastro caso o CPF seja inválido
+  document.getElementById('panel-register').addEventListener('submit', function(ev) {
+    const cpfInput = document.getElementById('reg-cpf');
+    const cpfError = document.getElementById('cpf-error-msg');
+    if (!cpfValido(cpfInput.value)) {
+      ev.preventDefault();
+      cpfInput.classList.add('error');
+      cpfError.classList.add('visible');
+      cpfInput.focus();
+    } else {
+      cpfInput.classList.remove('error');
+      cpfError.classList.remove('visible');
+    }
   });
 </script>
 </body>
