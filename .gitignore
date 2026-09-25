@@ -2,3 +2,5 @@ node_modules/
 package-lock.json
 package.json
 conexao.php
+.claude/settings.local.json
+.claude

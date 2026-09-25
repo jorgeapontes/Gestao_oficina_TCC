@@ -1,3 +1,45 @@
+<?php
+require __DIR__ . '/../includes/app.php';
+$u = exigir_login(['CLIENTE']);
+
+$cliente = db_one('SELECT nome, cpf, email, telefone, endereco FROM cliente WHERE id = ?', [$u['id']]);
+
+// ─── MEUS VEÍCULOS ───────────────────────────────────────────────────────────
+$veiculos = db_all("SELECT v.id, v.placa, v.ano, v.cor, mo.nome AS modelo, ma.nome AS marca,
+                           " . SQL_STATUS_ATIVO . " AS statusAtivo,
+                           (SELECT COUNT(*) FROM protocolo p WHERE p.idVeiculo = v.id AND p.status IN ('ABERTO','EM_ATENDIMENTO')) AS abertas,
+                           (SELECT COUNT(*) FROM protocolo p WHERE p.idVeiculo = v.id) AS protocolos
+                    FROM veiculo v
+                    JOIN modelo mo ON mo.id = v.idModelo
+                    JOIN marca ma  ON ma.id = mo.idMarca
+                    WHERE v.idCliente = ? ORDER BY statusAtivo IS NULL, v.placa", [$u['id']]);
+
+// Veículo selecionado (só entre os do próprio cliente).
+$sel = $veiculos[0] ?? null;
+foreach ($veiculos as $v) if ($v['id'] === ($_GET['v'] ?? '')) $sel = $v;
+
+// ─── OCORRÊNCIAS DO VEÍCULO SELECIONADO ──────────────────────────────────────
+$aba = ($_GET['tab'] ?? '') === 'todas' ? 'todas' : 'abertas';
+$ocorrencias = $sel ? db_all("SELECT p.numero, p.status, o.descricao, o.componentes, o.dataRegistro, col.nome AS colaborador
+                              FROM protocolo p
+                              JOIN ocorrencia o    ON o.id = p.idOcorrencia
+                              JOIN colaborador col ON col.id = p.responsavel
+                              WHERE p.idVeiculo = ?" . ($aba === 'abertas' ? " AND p.status IN ('ABERTO','EM_ATENDIMENTO')" : '') . "
+                              ORDER BY p.numero DESC", [$sel['id']]) : [];
+
+// ─── HISTÓRICO (todos os veículos) ───────────────────────────────────────────
+$historico = db_all("SELECT p.numero, p.dataFinalizacao, o.descricao, v.placa, col.nome AS colaborador
+                     FROM protocolo p
+                     JOIN ocorrencia o    ON o.id = p.idOcorrencia
+                     JOIN veiculo v       ON v.id = p.idVeiculo
+                     JOIN colaborador col ON col.id = p.responsavel
+                     WHERE v.idCliente = ? AND p.status = 'FINALIZADO'
+                     ORDER BY p.numero DESC LIMIT 4", [$u['id']]);
+
+function qs_dash(array $troca): string {
+    return '?' . http_build_query(array_filter(array_merge($_GET, $troca), fn($v) => $v !== null && $v !== ''));
+}
+?>
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -292,104 +334,42 @@
   </style>
 </head>
 <body>
+<style>
+  a.vehicle-card, a.add-vehicle-card, a.tab, a.card-action, a.proto-item { text-decoration: none; color: inherit; display: block; }
+  a.add-vehicle-card { display: flex; color: var(--muted); }
+  a.card-action { color: var(--muted); }
+  a.proto-item { display: flex; }
+</style>
 
-<!-- SIDEBAR -->
-<aside>
-  <div class="logo">
-    <div class="logo-mark">IMM</div>
-    <div class="logo-name">Integrated Mechanical<br>Management</div>
-  </div>
-
-  <nav>
-    <span class="nav-label">Principal</span>
-
-    <a class="nav-item active" href="#">
-      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
-      Meu Painel
-    </a>
-
-    <a class="nav-item" href="meus_veiculos.html">
-      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 00-4 0v2M8 7V5a2 2 0 00-4 0v2"/><circle cx="12" cy="14" r="2"/></svg>
-      Meus Veículos
-    </a>
-
-    <a class="nav-item" href="visualizar_ocorrencias.html">
-      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 12h6m-6 4h6M9 8h6M5 21h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>
-      Ocorrências
-    </a>
-
-    <span class="nav-label">Registros</span>
-
-    <a class="nav-item" href="historico.html">
-      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-      Histórico
-    </a>
-
-    <span class="nav-label">Conta</span>
-
-    <a class="nav-item" href="perfil.html">
-      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
-      Meu Perfil
-    </a>
-  </nav>
-
-  <div class="sidebar-footer">
-    <div class="user-chip">
-      <div class="avatar">CS</div>
-      <div class="user-info">
-        <div class="user-name">Cláudia Souza</div>
-        <div class="user-role">Cliente</div>
-      </div>
-      <a class="nav-item" href="#">
-        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg>
-        Sair
-      </a>
-    </div>
-  </div>
-</aside>
+<?php sidebar('dashboard'); ?>
 
 <!-- MAIN -->
 <main>
 
-  <!-- topbar -->
-  <div class="topbar">
-    <div class="notif-btn">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 01-3.46 0"/></svg>
-      <div class="notif-dot"></div>
-    </div>
-  </div>
-
   <!-- header -->
   <div class="page-header">
     <div>
-      <div class="page-title">Olá, Cláudia</div>
+      <div class="page-title">Olá, <?= e(primeiro_nome($u['nome'])) ?></div>
       <div class="page-sub">Acompanhe aqui os seus veículos e atendimentos.</div>
     </div>
-    <div class="page-date">Quarta-feira, 13 mai 2026</div>
+    <div class="page-date"><?= data_hoje() ?></div>
   </div>
 
   <!-- veículos -->
   <div class="vehicles-row">
+    <?php foreach ($veiculos as $v): ?>
+    <a class="vehicle-card<?= $sel && $sel['id'] === $v['id'] ? ' selected' : '' ?>" href="<?= e(qs_dash(['v' => $v['id']])) ?>">
+      <div class="vc-status"><?= badge(status_veiculo($v['statusAtivo'])) ?></div>
+      <div class="vc-plate"><?= e($v['placa']) ?></div>
+      <div class="vc-model"><?= e($v['marca'] . ' ' . $v['modelo']) ?></div>
+      <div class="vc-year"><?= e($v['ano'] . ' · ' . $v['cor']) ?></div>
+    </a>
+    <?php endforeach; ?>
 
-    <div class="vehicle-card selected">
-      <div class="vc-status"><span class="badge prog">Em andamento</span></div>
-      <div class="vc-plate">GHI-9012</div>
-      <div class="vc-model">Honda Civic</div>
-      <div class="vc-year">2021 · Prata</div>
-    </div>
-
-    <div class="vehicle-card">
-      <div class="vc-status"><span class="badge done">Sem ocorrências</span></div>
-      <div class="vc-plate">VWX-4455</div>
-      <div class="vc-model">Volkswagen Polo</div>
-      <div class="vc-year">2023 · Branco</div>
-    </div>
-
-    <div class="add-vehicle-card">
+    <a class="add-vehicle-card" href="meus_veiculos.php?novo=1">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
       Cadastrar veículo
-    </div>
-
+    </a>
   </div>
 
   <!-- two col -->
@@ -401,98 +381,67 @@
       <!-- Ocorrências do veículo -->
       <div class="card">
         <div class="card-header">
-          <div>
-            <div class="card-title">Ocorrências — GHI-9012</div>
-          </div>
-          <span class="badge prog">Em andamento</span>
+          <div class="card-title">Ocorrências<?= $sel ? ' — ' . e($sel['placa']) : '' ?></div>
+          <?php if ($sel): ?><?= badge(status_veiculo($sel['statusAtivo'])) ?><?php endif; ?>
         </div>
 
+        <?php if (!$sel): ?>
+          <div class="empty-state">
+            <div class="empty-icon">🚗</div>
+            Você ainda não tem veículos cadastrados.<br>
+            <a href="meus_veiculos.php?novo=1" style="color:var(--text);font-weight:500">Cadastre seu primeiro veículo</a>.
+          </div>
+        <?php else: ?>
         <div class="tab-bar">
-          <button class="tab active">Abertas</button>
-          <button class="tab">Todas</button>
+          <a class="tab<?= $aba === 'abertas' ? ' active' : '' ?>" href="<?= e(qs_dash(['tab' => null])) ?>">Abertas</a>
+          <a class="tab<?= $aba === 'todas' ? ' active' : '' ?>" href="<?= e(qs_dash(['tab' => 'todas'])) ?>">Todas</a>
         </div>
 
         <div class="occ-list">
-
+          <?php if (!$ocorrencias): ?>
+            <div class="empty-state">
+              <div class="empty-icon">✅</div>
+              <?= $aba === 'abertas' ? 'Nenhuma ocorrência em aberto para este veículo.' : 'Nenhuma ocorrência registrada para este veículo.' ?>
+            </div>
+          <?php endif; ?>
+          <?php foreach ($ocorrencias as $o): ?>
           <div class="occ-item">
-            <div class="occ-index">#OC-03</div>
+            <div class="occ-index"><?= proto_num($o['numero']) ?></div>
             <div class="occ-body">
-              <div class="occ-component">Embreagem</div>
-              <div class="occ-desc">Falha no acionamento da embreagem. Pedal com curso excessivo e dificuldade na troca de marchas em velocidades baixas.</div>
-              <div class="occ-meta">Registrado por Carlos Mendes · hoje, 09:42</div>
+              <div class="occ-component"><?= e($o['componentes'] ?: 'Ocorrência') ?></div>
+              <div class="occ-desc"><?= e($o['descricao']) ?></div>
+              <div class="occ-meta">Registrado por <?= e($o['colaborador']) ?> · <?= fmt_data_hora($o['dataRegistro']) ?></div>
             </div>
             <div class="occ-right">
-              <span class="badge prog">Em andamento</span>
+              <?= badge(status_protocolo($o['status'])) ?>
             </div>
           </div>
-
-          <div class="occ-item">
-            <div class="occ-index">#OC-02</div>
-            <div class="occ-body">
-              <div class="occ-component">Sistema elétrico</div>
-              <div class="occ-desc">Luz de check engine acionada. Possível falha no sensor de oxigênio traseiro.</div>
-              <div class="occ-meta">Registrado por Carlos Mendes · hoje, 09:15</div>
-            </div>
-            <div class="occ-right">
-              <span class="badge open">Aguardando peça</span>
-            </div>
-          </div>
-
-          <div class="occ-item">
-            <div class="occ-index">#OC-01</div>
-            <div class="occ-body">
-              <div class="occ-component">Suspensão traseira</div>
-              <div class="occ-desc">Barulho identificado ao passar em irregularidades. Amortecedores traseiros com desgaste acima do recomendado.</div>
-              <div class="occ-meta">Registrado por Fernanda Reis · ontem, 15:30</div>
-            </div>
-            <div class="occ-right">
-              <span class="badge done">Resolvido</span>
-            </div>
-          </div>
-
+          <?php endforeach; ?>
         </div>
+        <?php endif; ?>
       </div>
 
       <!-- Histórico de protocolos -->
       <div class="card">
         <div class="card-header">
           <div class="card-title">Histórico de atendimentos</div>
-          <button class="card-action">Ver todos →</button>
+          <a class="card-action" href="historico.php">Ver todos →</a>
         </div>
 
         <div class="proto-list">
-          <div class="proto-item">
+          <?php if (!$historico): ?>
+            <div class="empty-state">Nenhum atendimento finalizado ainda.</div>
+          <?php endif; ?>
+          <?php foreach ($historico as $h): ?>
+          <a class="proto-item" href="historico.php?numero=<?= (int)$h['numero'] ?>#p<?= (int)$h['numero'] ?>">
             <div>
-              <div class="proto-num">#20260430-11</div>
-              <div class="proto-desc">Troca de pastilhas de freio — GHI-9012</div>
-              <div class="proto-date">30 abr 2026 · Carlos Mendes</div>
+              <div class="proto-num"><?= proto_num($h['numero']) ?></div>
+              <div class="proto-desc"><?= e(mb_strimwidth($h['descricao'], 0, 60, '…')) ?> — <?= e($h['placa']) ?></div>
+              <div class="proto-date"><?= fmt_data_curta($h['dataFinalizacao']) ?> · <?= e($h['colaborador']) ?></div>
             </div>
             <svg class="proto-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 18l6-6-6-6"/></svg>
-          </div>
-          <div class="proto-item">
-            <div>
-              <div class="proto-num">#20260318-05</div>
-              <div class="proto-desc">Revisão 30.000 km — GHI-9012</div>
-              <div class="proto-date">18 mar 2026 · Fernanda Reis</div>
-            </div>
-            <svg class="proto-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 18l6-6-6-6"/></svg>
-          </div>
-          <div class="proto-item">
-            <div>
-              <div class="proto-num">#20260201-09</div>
-              <div class="proto-desc">Substituição da correia dentada — GHI-9012</div>
-              <div class="proto-date">01 fev 2026 · Carlos Mendes</div>
-            </div>
-            <svg class="proto-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 18l6-6-6-6"/></svg>
-          </div>
-          <div class="proto-item">
-            <div>
-              <div class="proto-num">#20251108-14</div>
-              <div class="proto-desc">Troca de óleo e filtro — VWX-4455</div>
-              <div class="proto-date">08 nov 2025 · Carlos Mendes</div>
-            </div>
-            <svg class="proto-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 18l6-6-6-6"/></svg>
-          </div>
+          </a>
+          <?php endforeach; ?>
         </div>
       </div>
 
@@ -502,81 +451,62 @@
     <div class="right-col">
 
       <!-- Detalhes do veículo selecionado -->
+      <?php if ($sel): ?>
       <div class="card">
         <div class="card-header">
           <div class="card-title">Detalhes do veículo</div>
         </div>
         <div class="vi-body">
-          <div class="vi-row">
-            <span class="vi-key">Placa</span>
-            <span class="vi-val mono">GHI-9012</span>
-          </div>
+          <div class="vi-row"><span class="vi-key">Placa</span><span class="vi-val mono"><?= e($sel['placa']) ?></span></div>
           <div class="vi-divider"></div>
-          <div class="vi-row">
-            <span class="vi-key">Marca</span>
-            <span class="vi-val">Honda</span>
-          </div>
-          <div class="vi-row">
-            <span class="vi-key">Modelo</span>
-            <span class="vi-val">Civic</span>
-          </div>
-          <div class="vi-row">
-            <span class="vi-key">Ano</span>
-            <span class="vi-val">2021</span>
-          </div>
-          <div class="vi-row">
-            <span class="vi-key">Cor</span>
-            <span class="vi-val">Prata</span>
-          </div>
+          <div class="vi-row"><span class="vi-key">Marca</span><span class="vi-val"><?= e($sel['marca']) ?></span></div>
+          <div class="vi-row"><span class="vi-key">Modelo</span><span class="vi-val"><?= e($sel['modelo']) ?></span></div>
+          <div class="vi-row"><span class="vi-key">Ano</span><span class="vi-val"><?= e($sel['ano']) ?></span></div>
+          <div class="vi-row"><span class="vi-key">Cor</span><span class="vi-val"><?= e($sel['cor']) ?></span></div>
           <div class="vi-divider"></div>
-          <div class="vi-row">
-            <span class="vi-key">Ocorrências abertas</span>
-            <span class="vi-val">2</span>
-          </div>
-          <div class="vi-row">
-            <span class="vi-key">Total de protocolos</span>
-            <span class="vi-val">3</span>
-          </div>
+          <div class="vi-row"><span class="vi-key">Ocorrências abertas</span><span class="vi-val"><?= (int)$sel['abertas'] ?></span></div>
+          <div class="vi-row"><span class="vi-key">Total de protocolos</span><span class="vi-val"><?= (int)$sel['protocolos'] ?></span></div>
         </div>
       </div>
+      <?php endif; ?>
 
       <!-- Perfil -->
       <div class="card">
         <div class="card-header">
           <div class="card-title">Meu perfil</div>
-          <button class="card-action">Editar →</button>
+          <a class="card-action" href="perfil.php">Editar →</a>
         </div>
         <div class="profile-body">
           <div class="profile-avatar-row">
-            <div class="profile-avatar">CS</div>
+            <div class="profile-avatar"><?= e(initials($cliente['nome'])) ?></div>
             <div>
-              <div class="profile-name">Cláudia Souza</div>
-              <div class="profile-since">Cliente desde jan 2025</div>
+              <div class="profile-name"><?= e($cliente['nome']) ?></div>
+              <div class="profile-since"><?= plural(count($veiculos), 'veículo', 'veículos') ?></div>
             </div>
           </div>
 
           <div class="field-row">
             <span class="field-label">E-mail</span>
-            <span class="field-value">claudia.souza@email.com</span>
+            <span class="field-value"><?= e($cliente['email']) ?></span>
           </div>
           <div class="vi-divider"></div>
           <div class="field-row">
             <span class="field-label">Telefone</span>
-            <span class="field-value">(11) 98765-4321</span>
+            <span class="field-value"><?= e(fmt_tel($cliente['telefone'])) ?></span>
           </div>
           <div class="vi-divider"></div>
           <div class="field-row">
             <span class="field-label">Endereço</span>
-            <span class="field-value">Rua das Flores, 142 — Jundiaí, SP</span>
+            <span class="field-value"><?= e($cliente['endereco']) ?></span>
           </div>
           <div class="vi-divider"></div>
           <div class="field-row">
             <span class="field-label">CPF</span>
-            <span class="field-value" style="font-family:'DM Mono',monospace;font-size:12.5px;">•••.456.•••-89</span>
+            <span class="field-value" style="font-family:'DM Mono',monospace;font-size:12.5px;">•••.<?= e(substr($cliente['cpf'], 3, 3)) ?>.•••-<?= e(substr($cliente['cpf'], 9, 2)) ?></span>
           </div>
         </div>
         <div style="padding: 0 22px 18px;">
-          <button class="btn-ghost">Editar dados cadastrais</button>
+          <a class="btn-ghost" href="perfil.php" style="display:block;text-decoration:none">Editar dados cadastrais</a>
         </div>
       </div>
 
@@ -584,5 +514,7 @@
   </div>
 
 </main>
+
+<?php flash_html(); ?>
 </body>
 </html>

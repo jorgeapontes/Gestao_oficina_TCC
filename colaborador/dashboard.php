@@ -1,3 +1,52 @@
+<?php
+require __DIR__ . '/../includes/app.php';
+$u = exigir_login(['COLABORADOR', 'ADMIN']);
+$me = $u['id'];
+
+// ─── ESTATÍSTICAS ────────────────────────────────────────────────────────────
+$emAberto    = (int)db_val("SELECT COUNT(*) FROM protocolo WHERE responsavel = ? AND status = 'ABERTO'", [$me]);
+$emAndamento = (int)db_val("SELECT COUNT(*) FROM protocolo WHERE responsavel = ? AND status = 'EM_ATENDIMENTO'", [$me]);
+$finalHoje   = (int)db_val("SELECT COUNT(*) FROM protocolo WHERE responsavel = ? AND status = 'FINALIZADO' AND dataFinalizacao = CURDATE()", [$me]);
+$totalOc     = (int)db_val('SELECT COUNT(*) FROM protocolo WHERE responsavel = ?', [$me]);
+$ocSemana    = (int)db_val('SELECT COUNT(*) FROM protocolo p JOIN ocorrencia o ON o.id = p.idOcorrencia
+                            WHERE p.responsavel = ? AND o.dataRegistro >= NOW() - INTERVAL 7 DAY', [$me]);
+$finalMes    = (int)db_val("SELECT COUNT(*) FROM protocolo WHERE responsavel = ? AND status = 'FINALIZADO'
+                            AND YEAR(dataFinalizacao) = YEAR(CURDATE()) AND MONTH(dataFinalizacao) = MONTH(CURDATE())", [$me]);
+
+// ─── MEUS ATENDIMENTOS (abas) ────────────────────────────────────────────────
+$abas = [
+    'aberto'      => ['Em aberto',        "p.status = 'ABERTO'"],
+    'andamento'   => ['Em andamento',     "p.status = 'EM_ATENDIMENTO'"],
+    'finalizados' => ['Finalizados hoje', "p.status = 'FINALIZADO' AND p.dataFinalizacao = CURDATE()"],
+];
+$aba = array_key_exists($_GET['tab'] ?? '', $abas) ? $_GET['tab'] : 'aberto';
+$atendimentos = db_all("SELECT p.numero, p.status, c.nome AS cliente, v.placa, o.descricao
+                        FROM protocolo p
+                        JOIN ocorrencia o ON o.id = p.idOcorrencia
+                        JOIN veiculo v    ON v.id = p.idVeiculo
+                        JOIN cliente c    ON c.id = v.idCliente
+                        WHERE p.responsavel = ? AND {$abas[$aba][1]}
+                        ORDER BY p.numero DESC", [$me]);
+
+// ─── VEÍCULO EM FOCO: o do atendimento ativo mais recente ────────────────────
+$foco = db_one("SELECT p.numero, v.id, v.placa, v.ano, v.cor, mo.nome AS modelo, ma.nome AS marca,
+                       c.nome AS cliente, c.telefone
+                FROM protocolo p
+                JOIN veiculo v ON v.id = p.idVeiculo
+                JOIN modelo mo ON mo.id = v.idModelo
+                JOIN marca ma  ON ma.id = mo.idMarca
+                JOIN cliente c ON c.id = v.idCliente
+                WHERE p.responsavel = ? AND p.status IN ('ABERTO','EM_ATENDIMENTO')
+                ORDER BY p.status = 'EM_ATENDIMENTO' DESC, p.numero DESC LIMIT 1", [$me]);
+$histFoco = $foco ? db_all("SELECT p.numero, p.dataFinalizacao, o.descricao
+                            FROM protocolo p JOIN ocorrencia o ON o.id = p.idOcorrencia
+                            WHERE p.idVeiculo = ? AND p.status = 'FINALIZADO'
+                            ORDER BY p.numero DESC LIMIT 3", [$foco['id']]) : [];
+
+$hora = (int)date('G');
+$saudacao = $hora < 12 ? 'Bom dia' : ($hora < 18 ? 'Boa tarde' : 'Boa noite');
+$pendentes = $emAberto + $emAndamento;
+?>
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -312,103 +361,53 @@
   </style>
 </head>
 <body>
+<style>
+  a.tab, a.card-action { text-decoration: none; display: inline-block; }
+  tbody tr[data-href] { cursor: pointer; }
+</style>
 
-<!-- SIDEBAR -->
-<aside>
-  <div class="logo">
-    <div class="logo-mark">IMM</div>
-    <div class="logo-name">Integrated Mechanical<br>Management</div>
-  </div>
-
-  <nav>
-    <span class="nav-label">Principal</span>
-
-    <a class="nav-item active" href="#">
-      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
-      Meu Painel
-    </a>
-
-    <a class="nav-item" href="registrar_ocorrencia.html">
-      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 12h6m-6 4h6M9 8h6M5 21h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>
-      Ocorrências
-    </a>
-
-    <a class="nav-item" href="visualizar_clientes.html">
-      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
-      Clientes
-    </a>
-
-    <a class="nav-item" href="veiculos.html">
-      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 00-4 0v2M8 7V5a2 2 0 00-4 0v2"/><circle cx="12" cy="14" r="2"/></svg>
-      Veículos
-    </a>
-
-    <span class="nav-label">Registros</span>
-
-    <a class="nav-item" href="../admin/historico.html">
-      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-      Histórico
-    </a>
-  </nav>
-
-  <div class="sidebar-footer">
-    <div class="user-chip">
-      <div class="avatar">CM</div>
-      <div class="user-info">
-        <div class="user-name">Carlos Mendes</div>
-        <div class="user-role">Mecânico · Colaborador</div>
-      </div>
-      <a class="nav-item" href="imm-login.html">
-        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg>
-        Sair
-      </a>
-    </div>
-  </div>
-</aside>
+<?php sidebar('dashboard'); ?>
 
 <!-- MAIN -->
 <main>
 
   <!-- topbar -->
   <div class="topbar">
-    <div class="search-wrap">
+    <form class="search-wrap" method="GET" action="veiculos.php">
       <svg class="search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
-      <input class="search-input" type="text" placeholder="Buscar cliente, placa ou protocolo…"/>
-    </div>
-    <div class="notif-btn">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 01-3.46 0"/></svg>
-      <div class="notif-dot"></div>
-    </div>
+      <input class="search-input" type="text" name="q" placeholder="Buscar cliente ou placa…"/>
+    </form>
   </div>
 
   <!-- header -->
   <div class="page-header">
     <div>
       <div class="page-title">Meu Painel</div>
-      <div class="page-sub">Bom dia, Carlos. Você tem 3 atendimentos em aberto.</div>
+      <div class="page-sub"><?= $saudacao ?>, <?= e(primeiro_nome($u['nome'])) ?>.
+        <?= $pendentes ? 'Você tem ' . plural($pendentes, 'atendimento', 'atendimentos') . ' em aberto.' : 'Nenhum atendimento pendente.' ?></div>
     </div>
-    <div class="page-date">Quarta-feira, 13 mai 2026</div>
+    <div class="page-date"><?= data_hoje() ?></div>
   </div>
 
   <!-- stats -->
   <div class="stats-grid">
     <div class="stat-card">
-      <div class="stat-label">Meus atendimentos hoje</div>
-      <div class="stat-value">5</div>
-      <div class="stat-delta">3 em aberto · 2 finalizados</div>
+      <div class="stat-label">Meus atendimentos ativos</div>
+      <div class="stat-value"><?= $pendentes ?></div>
+      <div class="stat-delta"><?= $emAberto ?> em aberto · <?= $emAndamento ?> em andamento · <?= $finalHoje ?> finalizados hoje</div>
     </div>
     <div class="stat-card">
       <div class="stat-label">Ocorrências registradas</div>
-      <div class="stat-value">11</div>
-      <div class="stat-delta up">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 15l-6-6-6 6"/></svg>
-        +4 esta semana
+      <div class="stat-value"><?= $totalOc ?></div>
+      <div class="stat-delta<?= $ocSemana ? ' up' : '' ?>">
+        <?php if ($ocSemana): ?><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 15l-6-6-6 6"/></svg><?php endif; ?>
+        +<?= $ocSemana ?> esta semana
       </div>
     </div>
     <div class="stat-card">
       <div class="stat-label">Protocolos finalizados (mês)</div>
-      <div class="stat-value">38</div>
-      <div class="stat-delta">Maio de 2026</div>
+      <div class="stat-value"><?= $finalMes ?></div>
+      <div class="stat-delta"><?= ucfirst(MESES[(int)date('n')]) ?> de <?= date('Y') ?></div>
     </div>
   </div>
 
@@ -422,15 +421,21 @@
       <div class="card">
         <div class="card-header">
           <div class="card-title">Meus atendimentos</div>
-          <button class="card-action">Ver histórico →</button>
+          <a class="card-action" href="../admin/historico.php">Ver histórico →</a>
         </div>
 
         <div class="tab-bar">
-          <button class="tab active">Em aberto</button>
-          <button class="tab">Em andamento</button>
-          <button class="tab">Finalizados hoje</button>
+          <?php foreach ($abas as $chave => [$rotulo]): ?>
+            <a class="tab<?= $chave === $aba ? ' active' : '' ?>" href="?tab=<?= $chave ?>"><?= e($rotulo) ?></a>
+          <?php endforeach; ?>
         </div>
 
+        <?php if (!$atendimentos): ?>
+          <div class="empty-state">
+            <div class="empty-icon">📋</div>
+            Nenhum atendimento nesta aba.
+          </div>
+        <?php else: ?>
         <table>
           <thead>
             <tr>
@@ -442,61 +447,39 @@
             </tr>
           </thead>
           <tbody>
-            <tr>
-              <td><span class="td-proto">#20260513-02</span></td>
-              <td>Bruno Leal</td>
-              <td><span class="td-plate">DEF-5678</span></td>
-              <td>Desgaste no freio dianteiro</td>
-              <td><span class="badge open">Aguardando peça</span></td>
+            <?php foreach ($atendimentos as $a): ?>
+            <tr data-href="atendimento.php?numero=<?= (int)$a['numero'] ?>">
+              <td><span class="td-proto"><?= proto_num($a['numero']) ?></span></td>
+              <td><?= e($a['cliente']) ?></td>
+              <td><span class="td-plate"><?= e($a['placa']) ?></span></td>
+              <td><?= e(mb_strimwidth($a['descricao'], 0, 48, '…')) ?></td>
+              <td><?= badge(status_protocolo($a['status'])) ?></td>
             </tr>
-            <tr>
-              <td><span class="td-proto">#20260513-03</span></td>
-              <td>Cláudia Souza</td>
-              <td><span class="td-plate">GHI-9012</span></td>
-              <td>Falha na embreagem</td>
-              <td><span class="badge prog">Em andamento</span></td>
-            </tr>
-            <tr>
-              <td><span class="td-proto">#20260513-07</span></td>
-              <td>Marcos Pinheiro</td>
-              <td><span class="td-plate">STU-2233</span></td>
-              <td>Barulho na suspensão traseira</td>
-              <td><span class="badge open">Aberto</span></td>
-            </tr>
+            <?php endforeach; ?>
           </tbody>
         </table>
+        <?php endif; ?>
       </div>
 
       <!-- Registrar ocorrência -->
-      <div class="card">
+      <form class="card" method="POST" action="registrar_ocorrencia.php">
+        <?= csrf_field() ?>
+        <input type="hidden" name="_action" value="registrar"/>
         <div class="card-header">
-          <div class="card-title">Registrar ocorrência</div>
+          <div class="card-title">Registrar ocorrência rápida</div>
+          <a class="card-action" href="registrar_ocorrencia.php">Formulário completo →</a>
         </div>
 
-        <!-- busca de veículo -->
-        <div class="client-search">
-          <div class="form-label" style="margin-bottom:8px;">Localizar veículo</div>
-          <div class="input-row">
-            <input class="field-input" type="text" placeholder="Digite a placa ou CPF do cliente…"/>
-            <button class="btn-primary">Buscar</button>
-          </div>
-        </div>
-
-        <!-- formulário -->
         <div class="form-body">
           <div class="form-group">
-            <label class="form-label">Veículo selecionado</label>
-            <select class="form-select">
-              <option value="" disabled selected>— selecione após busca —</option>
-              <option>GHI-9012 · Honda Civic 2021 · Cláudia Souza</option>
-              <option>DEF-5678 · Toyota Corolla 2019 · Bruno Leal</option>
-            </select>
+            <label class="form-label">Placa do veículo</label>
+            <input class="field-input" type="text" name="placa" placeholder="ABC-1234" maxlength="8" style="text-transform:uppercase" required/>
           </div>
 
           <div class="form-group">
             <label class="form-label">Componente afetado</label>
-            <select class="form-select">
-              <option value="" disabled selected>— selecione o componente —</option>
+            <select class="form-select" name="componentes">
+              <option value="">— selecione o componente —</option>
               <option>Freios</option>
               <option>Motor</option>
               <option>Suspensão</option>
@@ -509,14 +492,14 @@
 
           <div class="form-group">
             <label class="form-label">Descrição do problema</label>
-            <textarea class="form-textarea" placeholder="Descreva o problema identificado, sintomas observados e condição do componente…"></textarea>
+            <textarea class="form-textarea" name="itens[]" maxlength="200" required placeholder="Descreva o problema identificado, sintomas observados e condição do componente…"></textarea>
           </div>
         </div>
         <div class="form-footer">
-          <button class="btn-ghost">Cancelar</button>
-          <button class="btn-primary">Registrar ocorrência</button>
+          <button type="reset" class="btn-ghost">Limpar</button>
+          <button type="submit" class="btn-primary">Registrar ocorrência</button>
         </div>
-      </div>
+      </form>
 
     </div>
 
@@ -527,96 +510,59 @@
       <div class="card">
         <div class="card-header">
           <div class="card-title">Veículo em foco</div>
-          <button class="card-action">Editar →</button>
+          <?php if ($foco): ?><a class="card-action" href="atendimento.php?numero=<?= (int)$foco['numero'] ?>">Abrir →</a><?php endif; ?>
         </div>
+        <?php if (!$foco): ?>
+          <div class="empty-state">Nenhum atendimento ativo no momento.</div>
+        <?php else: ?>
         <div class="vehicle-info">
-          <div class="vi-row">
-            <span class="vi-key">Placa</span>
-            <span class="vi-val mono">GHI-9012</span>
-          </div>
+          <div class="vi-row"><span class="vi-key">Placa</span><span class="vi-val mono"><?= e($foco['placa']) ?></span></div>
           <div class="vi-divider"></div>
-          <div class="vi-row">
-            <span class="vi-key">Modelo</span>
-            <span class="vi-val">Honda Civic</span>
-          </div>
-          <div class="vi-row">
-            <span class="vi-key">Ano</span>
-            <span class="vi-val">2021</span>
-          </div>
-          <div class="vi-row">
-            <span class="vi-key">Cor</span>
-            <span class="vi-val">Prata</span>
-          </div>
+          <div class="vi-row"><span class="vi-key">Modelo</span><span class="vi-val"><?= e($foco['marca'] . ' ' . $foco['modelo']) ?></span></div>
+          <div class="vi-row"><span class="vi-key">Ano</span><span class="vi-val"><?= e($foco['ano']) ?></span></div>
+          <div class="vi-row"><span class="vi-key">Cor</span><span class="vi-val"><?= e($foco['cor']) ?></span></div>
           <div class="vi-divider"></div>
-          <div class="vi-row">
-            <span class="vi-key">Proprietário</span>
-            <span class="vi-val">Cláudia Souza</span>
-          </div>
-          <div class="vi-row">
-            <span class="vi-key">Contato</span>
-            <span class="vi-val mono" style="font-size:12px;">(11) 98765-4321</span>
-          </div>
+          <div class="vi-row"><span class="vi-key">Proprietário</span><span class="vi-val"><?= e($foco['cliente']) ?></span></div>
+          <div class="vi-row"><span class="vi-key">Contato</span><span class="vi-val mono" style="font-size:12px;"><?= e(fmt_tel($foco['telefone'])) ?></span></div>
         </div>
+        <?php endif; ?>
       </div>
 
       <!-- Histórico do veículo -->
+      <?php if ($foco): ?>
       <div class="card">
         <div class="card-header">
           <div class="card-title">Histórico do veículo</div>
-          <button class="card-action">Ver tudo →</button>
+          <a class="card-action" href="../admin/historico.php?q=<?= urlencode($foco['placa']) ?>">Ver tudo →</a>
         </div>
+        <?php if (!$histFoco): ?>
+          <div class="empty-state">Nenhum atendimento finalizado para este veículo.</div>
+        <?php else: ?>
         <div class="hist-list">
+          <?php foreach ($histFoco as $h): ?>
           <div class="hist-item">
+            <div><div class="hist-badge"><?= proto_num($h['numero']) ?></div></div>
             <div>
-              <div class="hist-badge">#20260430-11</div>
-            </div>
-            <div>
-              <div class="hist-desc">Troca de pastilhas de freio dianteiras e traseiras</div>
-              <div class="hist-date">30 abr 2026</div>
+              <div class="hist-desc"><?= e($h['descricao']) ?></div>
+              <div class="hist-date"><?= fmt_data_curta($h['dataFinalizacao']) ?></div>
             </div>
           </div>
-          <div class="hist-item">
-            <div>
-              <div class="hist-badge">#20260318-05</div>
-            </div>
-            <div>
-              <div class="hist-desc">Revisão de 30.000 km — troca de óleo e filtros</div>
-              <div class="hist-date">18 mar 2026</div>
-            </div>
-          </div>
-          <div class="hist-item">
-            <div>
-              <div class="hist-badge">#20260201-09</div>
-            </div>
-            <div>
-              <div class="hist-desc">Substituição da correia dentada</div>
-              <div class="hist-date">01 fev 2026</div>
-            </div>
-          </div>
+          <?php endforeach; ?>
         </div>
+        <?php endif; ?>
       </div>
+      <?php endif; ?>
 
-      <!-- Cadastrar veículo rápido -->
+      <!-- Cadastrar veículo -->
       <div class="card">
         <div class="card-header">
           <div class="card-title">Cadastrar veículo</div>
         </div>
-        <div class="form-body" style="gap:10px;">
-          <div class="form-group">
-            <label class="form-label">Placa</label>
-            <input class="field-input" type="text" placeholder="ABC-1234" style="background:#fff;"/>
-          </div>
-          <div class="form-group">
-            <label class="form-label">Modelo</label>
-            <input class="field-input" type="text" placeholder="ex: Civic, Corolla…" style="background:#fff;"/>
-          </div>
-          <div class="form-group">
-            <label class="form-label">Cliente proprietário</label>
-            <input class="field-input" type="text" placeholder="Buscar por nome ou CPF…" style="background:#fff;"/>
-          </div>
+        <div class="form-body" style="font-size:13px;color:var(--muted);line-height:1.6">
+          Veículo ainda não cadastrado? Cadastre-o vinculado ao cliente proprietário antes de registrar a ocorrência.
         </div>
         <div class="form-footer">
-          <button class="btn-primary" style="width:100%;">Cadastrar veículo</button>
+          <a class="btn-primary" href="veiculos.php?novo=1" style="width:100%;text-align:center;text-decoration:none">Cadastrar veículo</a>
         </div>
       </div>
 
@@ -624,5 +570,11 @@
   </div>
 
 </main>
+
+<?php flash_html(); ?>
+
+<script>
+  document.querySelectorAll('tr[data-href]').forEach(tr => tr.addEventListener('click', () => location.href = tr.dataset.href));
+</script>
 </body>
 </html>

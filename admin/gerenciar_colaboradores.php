@@ -1,31 +1,8 @@
 <?php
-// ─── CONEXÃO ─────────────────────────────────────────────────────────────────
-// Estrutura real: gestao_oficina > colaborador (id, nome, cpf, email, senha, cargo, setor)
-$host   = 'localhost';
-$user   = 'root';
-$pass   = '';
-$db     = 'gestao_oficina';
-$conn   = new mysqli($host, $user, $pass, $db);
-$conn->set_charset('utf8mb4');
-
-if ($conn->connect_error) {
-    die('<p style="color:red;padding:2rem">Erro de conexão: ' . $conn->connect_error . '</p>');
-}
+require __DIR__ . '/../includes/app.php';
+$u = exigir_login(['ADMIN']);
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
-function uuid(): string {
-    return sprintf('%04x%04x-%04x-%04x-%04x-%04x%04x%04x',
-        mt_rand(0,0xffff), mt_rand(0,0xffff), mt_rand(0,0xffff),
-        mt_rand(0,0x0fff)|0x4000, mt_rand(0,0x3fff)|0x8000,
-        mt_rand(0,0xffff), mt_rand(0,0xffff), mt_rand(0,0xffff));
-}
-function e(string $s): string { return htmlspecialchars($s, ENT_QUOTES, 'UTF-8'); }
-function initials(string $nome): string {
-    $parts = explode(' ', trim($nome));
-    $i = strtoupper(substr($parts[0],0,1));
-    if (count($parts) > 1) $i .= strtoupper(substr(end($parts),0,1));
-    return $i;
-}
 $avatarColors = ['ca-blue','ca-green','ca-amber','ca-rose','ca-slate'];
 function avatarColor(string $id): string {
     global $avatarColors;
@@ -33,62 +10,65 @@ function avatarColor(string $id): string {
 }
 
 // ─── CRUD ────────────────────────────────────────────────────────────────────
-$msg = '';
+if (in_array(acao(), ['criar', 'editar'], true)) {
+    $id     = post('id');
+    $nome   = post('nome');
+    $cpf    = so_digitos(post('cpf'));
+    $email  = post('email');
+    $cargo  = post('cargo');
+    $setor  = post('setor');
+    $perfil = post('perfil') === 'ADMIN' ? 'ADMIN' : 'COLABORADOR';
+    $senha  = $_POST['senha'] ?? '';
 
-// CRIAR
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['_action'] ?? '') === 'criar') {
-    $id    = uuid();
-    $nome  = trim($_POST['nome']  ?? '');
-    $cpf   = preg_replace('/\D/','',$_POST['cpf'] ?? '');
-    $email = trim($_POST['email'] ?? '');
-    $senha = password_hash($_POST['senha'] ?? 'imm@123', PASSWORD_DEFAULT);
-    $cargo = trim($_POST['cargo'] ?? '');
-    $setor = trim($_POST['setor'] ?? '');
-
-    if ($nome && $cpf && $email && $cargo && $setor) {
-        $stmt = $conn->prepare("INSERT INTO colaborador (id,nome,cpf,email,senha,cargo,setor) VALUES (?,?,?,?,?,?,?)");
-        $stmt->bind_param('sssssss',$id,$nome,$cpf,$email,$senha,$cargo,$setor);
-        if ($stmt->execute()) $msg = 'ok:Colaborador cadastrado com sucesso!';
-        else $msg = 'err:Erro ao cadastrar: ' . $stmt->error;
-        $stmt->close();
-    } else { $msg = 'err:Preencha todos os campos obrigatórios.'; }
-}
-
-// EDITAR
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['_action'] ?? '') === 'editar') {
-    $id    = $_POST['id']    ?? '';
-    $nome  = trim($_POST['nome']  ?? '');
-    $cpf   = preg_replace('/\D/','',$_POST['cpf'] ?? '');
-    $email = trim($_POST['email'] ?? '');
-    $cargo = trim($_POST['cargo'] ?? '');
-    $setor = trim($_POST['setor'] ?? '');
-
-    if ($id && $nome && $cpf && $email && $cargo && $setor) {
-        $stmt = $conn->prepare("UPDATE colaborador SET nome=?,cpf=?,email=?,cargo=?,setor=? WHERE id=?");
-        $stmt->bind_param('ssssss',$nome,$cpf,$email,$cargo,$setor,$id);
-        // Atualiza senha apenas se foi informada
-        if (!empty($_POST['senha'])) {
-            $novaSenha = password_hash($_POST['senha'], PASSWORD_DEFAULT);
-            $s2 = $conn->prepare("UPDATE colaborador SET senha=? WHERE id=?");
-            $s2->bind_param('ss', $novaSenha, $id);
-            $s2->execute(); $s2->close();
+    if (!$nome || !$cpf || !$email || !$cargo || !$setor || (acao() === 'criar' && $senha === '')) {
+        flash('err', 'Preencha todos os campos obrigatórios.');
+    } elseif (strlen($cpf) !== 11) {
+        flash('err', 'CPF inválido: informe os 11 dígitos.');
+    } elseif ($senha !== '' && strlen($senha) < 8) {
+        flash('err', 'A senha deve ter ao menos 8 caracteres.');
+    } elseif (db_val('SELECT 1 FROM cliente WHERE email = ?', [$email])) {
+        flash('err', 'Este e-mail já pertence a um cliente.');
+    } elseif (acao() === 'editar' && $id === $u['id'] && $perfil !== 'ADMIN') {
+        flash('err', 'Você não pode remover o seu próprio perfil de administrador.');
+    } else {
+        try {
+            if (acao() === 'criar') {
+                db_exec('INSERT INTO colaborador (id,nome,cpf,email,senha,cargo,setor,perfil) VALUES (?,?,?,?,?,?,?,?)',
+                        [uuid(), $nome, $cpf, $email, password_hash($senha, PASSWORD_DEFAULT), $cargo, $setor, $perfil]);
+                flash('ok', 'Colaborador cadastrado com sucesso!');
+            } else {
+                db_exec('UPDATE colaborador SET nome=?,cpf=?,email=?,cargo=?,setor=?,perfil=? WHERE id=?',
+                        [$nome, $cpf, $email, $cargo, $setor, $perfil, $id]);
+                // Atualiza senha apenas se foi informada
+                if ($senha !== '') {
+                    db_exec('UPDATE colaborador SET senha=? WHERE id=?', [password_hash($senha, PASSWORD_DEFAULT), $id]);
+                }
+                if ($id === $u['id']) $_SESSION['user']['nome'] = $nome;
+                flash('ok', 'Colaborador atualizado com sucesso!');
+            }
+        } catch (mysqli_sql_exception $ex) {
+            flash('err', erro_db($ex));
         }
-        if ($stmt->execute()) $msg = 'ok:Colaborador atualizado com sucesso!';
-        else $msg = 'err:Erro ao atualizar: ' . $stmt->error;
-        $stmt->close();
-    } else { $msg = 'err:Preencha todos os campos obrigatórios.'; }
+    }
+    redirecionar('gerenciar_colaboradores.php');
 }
 
-// EXCLUIR
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['_action'] ?? '') === 'excluir') {
-    $id = $_POST['id'] ?? '';
-    if ($id) {
-        $stmt = $conn->prepare("DELETE FROM colaborador WHERE id=?");
-        $stmt->bind_param('s',$id);
-        if ($stmt->execute()) $msg = 'ok:Colaborador removido.';
-        else $msg = 'err:Erro ao remover.';
-        $stmt->close();
+// EXCLUIR — colaboradores com atendimentos/itens registrados não podem ser removidos (histórico imutável).
+if (acao() === 'excluir') {
+    $id = post('id');
+    if ($id === $u['id']) {
+        flash('err', 'Você não pode remover a si mesmo.');
+    } else {
+        try {
+            db_exec('DELETE FROM colaborador WHERE id=?', [$id]);
+            flash('ok', 'Colaborador removido.');
+        } catch (mysqli_sql_exception $ex) {
+            flash('err', $ex->getCode() === 1451
+                ? 'Não é possível remover: este colaborador possui atendimentos registrados no histórico.'
+                : erro_db($ex));
+        }
     }
+    redirecionar('gerenciar_colaboradores.php');
 }
 
 // ─── LEITURA + FILTROS ───────────────────────────────────────────────────────
@@ -98,33 +78,24 @@ $busca         = trim($_GET['q'] ?? '');
 
 $where = [];
 $params = [];
-$types  = '';
-if ($filtro_cargo)  { $where[] = 'cargo = ?';  $params[] = $filtro_cargo;  $types .= 's'; }
-if ($filtro_setor)  { $where[] = 'setor = ?';  $params[] = $filtro_setor;  $types .= 's'; }
+if ($filtro_cargo)  { $where[] = 'cargo = ?';  $params[] = $filtro_cargo; }
+if ($filtro_setor)  { $where[] = 'setor = ?';  $params[] = $filtro_setor; }
 if ($busca) {
     $like = "%$busca%";
     $where[] = '(nome LIKE ? OR cpf LIKE ? OR cargo LIKE ?)';
-    $params[] = $like; $params[] = $like; $params[] = $like;
-    $types .= 'sss';
+    array_push($params, $like, $like, $like);
 }
-$sql = 'SELECT * FROM colaborador' . ($where ? ' WHERE ' . implode(' AND ', $where) : '') . ' ORDER BY nome ASC';
-if ($params) {
-    $stmt2 = $conn->prepare($sql);
-    $stmt2->bind_param($types, ...$params);
-    $stmt2->execute();
-    $result = $stmt2->get_result();
-} else {
-    $result = $conn->query($sql);
-}
-$colaboradores = $result->fetch_all(MYSQLI_ASSOC);
+$sql = 'SELECT id, nome, cpf, email, cargo, setor, perfil FROM colaborador'
+     . ($where ? ' WHERE ' . implode(' AND ', $where) : '') . ' ORDER BY nome ASC';
+$colaboradores = db_all($sql, $params);
 $total = count($colaboradores);
 
 // Valores únicos para os selects de filtro
-$cargos = $conn->query("SELECT DISTINCT cargo FROM colaborador WHERE cargo != '' ORDER BY cargo")->fetch_all(MYSQLI_ASSOC);
-$setores = $conn->query("SELECT DISTINCT setor FROM colaborador WHERE setor != '' ORDER BY setor")->fetch_all(MYSQLI_ASSOC);
+$cargos  = db_all("SELECT DISTINCT cargo FROM colaborador WHERE cargo != '' ORDER BY cargo");
+$setores = db_all("SELECT DISTINCT setor FROM colaborador WHERE setor != '' ORDER BY setor");
 
 // Dados para edição via JS
-$collab_json = json_encode($colaboradores, JSON_HEX_QUOT | JSON_HEX_APOS);
+$collab_json = json_encode($colaboradores, JSON_HEX_QUOT | JSON_HEX_APOS | JSON_HEX_TAG);
 ?>
 <!DOCTYPE html>
 <html lang="pt-BR">
@@ -176,64 +147,7 @@ $collab_json = json_encode($colaboradores, JSON_HEX_QUOT | JSON_HEX_APOS);
 </head>
 <body>
 
-<?php if ($msg): 
-  [$tipo,$texto] = explode(':', $msg, 2);
-?>
-<div class="toast <?= e($tipo) ?>" id="toast">
-  <?php if($tipo==='ok'): ?>
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>
-  <?php else: ?>
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6L6 18M6 6l12 12"/></svg>
-  <?php endif; ?>
-  <?= e($texto) ?>
-</div>
-<script>setTimeout(()=>{ const t=document.getElementById('toast'); if(t) t.style.opacity=0; }, 3500);</script>
-<?php endif; ?>
-
-<!-- SIDEBAR -->
-<aside>
-  <div class="logo">
-    <div class="logo-mark">IMM</div>
-    <div class="logo-name">Integrated Mechanical<br>Management</div>
-  </div>
-  <nav>
-    <span class="nav-label">Principal</span>
-    <a class="nav-item" href="dashboard.html">
-      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
-      Dashboard
-    </a>
-    <a class="nav-item" href="#">
-      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
-      Clientes
-    </a>
-    <a class="nav-item" href="#">
-      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 00-4 0v2M8 7V5a2 2 0 00-4 0v2"/><circle cx="12" cy="14" r="2"/></svg>
-      Veículos
-    </a>
-    <a class="nav-item active" href="#">
-      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg>
-      Colaboradores
-    </a>
-    <span class="nav-label">Registros</span>
-    <a class="nav-item" href="historico.html">
-      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-      Histórico
-    </a>
-  </nav>
-  <div class="sidebar-footer">
-    <div class="user-chip">
-      <div class="avatar">RC</div>
-      <div class="user-info">
-        <div class="user-name">Rafael Cardoso</div>
-        <div class="user-role">Administrador</div>
-      </div>
-      <a class="nav-item" href="imm-login.html">
-        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg>
-        Sair
-      </a>
-    </div>
-  </div>
-</aside>
+<?php sidebar('colaboradores'); ?>
 
 <!-- MAIN -->
 <main>
@@ -307,7 +221,7 @@ $collab_json = json_encode($colaboradores, JSON_HEX_QUOT | JSON_HEX_APOS);
             <div class="collab-cargo">
               <?= e($c['cargo'] ?: '—') ?><?= $c['setor'] ? ' · ' . e($c['setor']) : '' ?>
             </div>
-            <span class="badge active">Ativo</span>
+            <span class="badge active"><?= $c['perfil'] === 'ADMIN' ? 'Administrador' : 'Colaborador' ?></span>
           </div>
         </div>
         <div class="collab-meta">
@@ -346,6 +260,7 @@ $collab_json = json_encode($colaboradores, JSON_HEX_QUOT | JSON_HEX_APOS);
       </button>
     </div>
     <form method="POST" id="collab-form">
+      <?= csrf_field() ?>
       <input type="hidden" name="_action" id="form-action" value="criar"/>
       <input type="hidden" name="id"      id="form-id"     value=""/>
       <div class="modal-body">
@@ -370,12 +285,19 @@ $collab_json = json_encode($colaboradores, JSON_HEX_QUOT | JSON_HEX_APOS);
           </div>
           <div class="field-group">
             <div class="field-label">Setor</div>
-            <select class="field-input" name="setor" id="modal-setor" style="cursor:pointer">
+            <select class="field-input" name="setor" id="modal-setor" style="cursor:pointer" required>
               <option value="">Selecionar setor</option>
               <option>Mecânica Geral</option>
               <option>Elétrica</option>
               <option>Funilaria</option>
               <option>Gestão</option>
+            </select>
+          </div>
+          <div class="field-group" style="grid-column:1/-1">
+            <div class="field-label">Perfil de acesso *</div>
+            <select class="field-input" name="perfil" id="modal-perfil" style="cursor:pointer">
+              <option value="COLABORADOR">Colaborador — registra ocorrências e atendimentos</option>
+              <option value="ADMIN">Administrador — acesso total, incluindo colaboradores</option>
             </select>
           </div>
           <div class="field-group" style="grid-column:1/-1">
@@ -405,6 +327,7 @@ $collab_json = json_encode($colaboradores, JSON_HEX_QUOT | JSON_HEX_APOS);
     <div class="confirm-actions">
       <button class="btn-ghost" onclick="closeConfirm()">Cancelar</button>
       <form method="POST" style="display:contents">
+        <?= csrf_field() ?>
         <input type="hidden" name="_action" value="excluir"/>
         <input type="hidden" name="id"      id="confirm-id" value=""/>
         <button type="submit" class="btn-modal-primary" style="background:#c0392b;border-color:#c0392b">Remover</button>
@@ -412,6 +335,8 @@ $collab_json = json_encode($colaboradores, JSON_HEX_QUOT | JSON_HEX_APOS);
     </div>
   </div>
 </div>
+
+<?php flash_html(); ?>
 
 <script>
 const COLABORADORES = <?= $collab_json ?>;
@@ -442,6 +367,7 @@ function openModal(mode, id) {
     document.getElementById('modal-cargo').value = c.cargo  || '';
     document.getElementById('modal-setor').value = c.setor  || '';
     document.getElementById('modal-email').value = c.email;
+    document.getElementById('modal-perfil').value = c.perfil;
     document.getElementById('modal-senha').value = '';
   } else {
     title.textContent  = 'Novo Colaborador';
@@ -456,6 +382,7 @@ function openModal(mode, id) {
     document.getElementById('modal-cargo').value = '';
     document.getElementById('modal-setor').value = '';
     document.getElementById('modal-email').value = '';
+    document.getElementById('modal-perfil').value = 'COLABORADOR';
     document.getElementById('modal-senha').value = '';
   }
 }

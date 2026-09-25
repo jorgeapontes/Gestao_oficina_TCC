@@ -21,6 +21,9 @@ SET time_zone = "+00:00";
 -- Banco de dados: `gestao_oficina`
 --
 
+CREATE DATABASE IF NOT EXISTS `gestao_oficina` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;
+USE `gestao_oficina`;
+
 -- --------------------------------------------------------
 
 --
@@ -33,8 +36,16 @@ CREATE TABLE `cliente` (
   `cpf` varchar(11) NOT NULL,
   `email` varchar(100) NOT NULL,
   `senha` varchar(100) NOT NULL,
+  `telefone` varchar(15) DEFAULT NULL,
   `endereco` varchar(100) NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+-- Despejando dados para a tabela `cliente` (senha: cliente123)
+--
+
+INSERT INTO `cliente` (`id`, `nome`, `cpf`, `email`, `senha`, `telefone`, `endereco`) VALUES
+('0b1c6f3e-8f0a-4c55-9d53-3c1f6a2e7b01', 'Cláudia Souza', '12345678900', 'cliente@imm.com', '$2y$10$UICPMXUJ4njUFgnVM6wS0uWRNT03bbfXHWMw8RY8SBiJdlatDZTX2', '11987654321', 'Rua das Flores, 142 — Jundiaí, SP');
 
 -- --------------------------------------------------------
 
@@ -49,15 +60,19 @@ CREATE TABLE `colaborador` (
   `email` varchar(100) NOT NULL,
   `senha` varchar(100) NOT NULL,
   `cargo` varchar(50) NOT NULL,
-  `setor` varchar(50) NOT NULL
+  `setor` varchar(50) NOT NULL,
+  `perfil` enum('COLABORADOR','ADMIN') NOT NULL DEFAULT 'COLABORADOR'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 --
 -- Despejando dados para a tabela `colaborador`
+-- admin@imm.com (senha: admin123) · colaborador@imm.com (senha: colab123)
 --
 
-INSERT INTO `colaborador` (`id`, `nome`, `cpf`, `email`, `senha`, `cargo`, `setor`) VALUES
-('66e7dbd6-3014-452b-b6eb-819d0d7a6a83', 'ABC', '12312312323', 'colaborador@gmail.com', '$2y$10$1C4qOdwOqxrnd/HP.viPDuoNiReQt0N4H7ABN8Wg/8qW1hFWISqtu', 'Mecânico', 'Mecânica Geral');
+INSERT INTO `colaborador` (`id`, `nome`, `cpf`, `email`, `senha`, `cargo`, `setor`, `perfil`) VALUES
+('66e7dbd6-3014-452b-b6eb-819d0d7a6a83', 'ABC', '12312312323', 'colaborador@gmail.com', '$2y$10$1C4qOdwOqxrnd/HP.viPDuoNiReQt0N4H7ABN8Wg/8qW1hFWISqtu', 'Mecânico', 'Mecânica Geral', 'COLABORADOR'),
+('a1d7c0de-0000-4000-8000-000000000001', 'Rafael Cardoso', '11122233344', 'admin@imm.com', '$2y$10$kWTg2hzR3nnlCj3YpDPsyevX5yx93Kwc7RNZwGyZV.02vSJYQzzy.', 'Administrativo', 'Gestão', 'ADMIN'),
+('c01ab000-0000-4000-8000-000000000002', 'Carlos Mendes', '55566677788', 'colaborador@imm.com', '$2y$10$9d0Gn2iqhwy0E7jno2pqr.ku1f23ZKlFCA0bFa8w2i6MJwR9Wixjy', 'Mecânico', 'Mecânica Geral', 'COLABORADOR');
 
 -- --------------------------------------------------------
 
@@ -84,6 +99,17 @@ CREATE TABLE `marca` (
   `nome` varchar(100) NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
+INSERT INTO `marca` (`id`, `nome`) VALUES
+('3a000000-0000-4000-8000-000000000001', 'Chevrolet'),
+('3a000000-0000-4000-8000-000000000002', 'Fiat'),
+('3a000000-0000-4000-8000-000000000003', 'Ford'),
+('3a000000-0000-4000-8000-000000000004', 'Honda'),
+('3a000000-0000-4000-8000-000000000005', 'Hyundai'),
+('3a000000-0000-4000-8000-000000000006', 'Nissan'),
+('3a000000-0000-4000-8000-000000000007', 'Renault'),
+('3a000000-0000-4000-8000-000000000008', 'Toyota'),
+('3a000000-0000-4000-8000-000000000009', 'Volkswagen');
+
 -- --------------------------------------------------------
 
 --
@@ -95,6 +121,9 @@ CREATE TABLE `modelo` (
   `nome` varchar(100) NOT NULL,
   `idMarca` char(36) NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+INSERT INTO `modelo` (`id`, `nome`, `idMarca`) VALUES
+('4b000000-0000-4000-8000-000000000001', 'Civic', '3a000000-0000-4000-8000-000000000004');
 
 -- --------------------------------------------------------
 
@@ -140,6 +169,9 @@ CREATE TABLE `veiculo` (
   `idModelo` char(36) NOT NULL,
   `idCliente` char(36) NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+INSERT INTO `veiculo` (`id`, `placa`, `ano`, `cor`, `idModelo`, `idCliente`) VALUES
+('5c000000-0000-4000-8000-000000000001', 'GHI-9012', 2021, 'Prata', '4b000000-0000-4000-8000-000000000001', '0b1c6f3e-8f0a-4c55-9d53-3c1f6a2e7b01');
 
 --
 -- Índices para tabelas despejadas

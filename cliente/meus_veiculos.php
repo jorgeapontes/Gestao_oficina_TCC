@@ -1,3 +1,62 @@
+<?php
+require __DIR__ . '/../includes/app.php';
+$u = exigir_login(['CLIENTE']);
+
+// ─── CRUD (sempre restrito aos veículos do próprio cliente) ──────────────────
+if (in_array(acao(), ['criar', 'editar'], true)) {
+    $id      = post('id');
+    $placa   = normalizar_placa(post('placa'));
+    $idMarca = post('idMarca');
+    $modelo  = post('modelo');
+    $ano     = (int)post('ano');
+    $cor     = post('cor');
+
+    if (!$placa || !$idMarca || !$modelo || !$cor || !$ano) {
+        flash('err', 'Preencha todos os campos.');
+    } elseif (!preg_match('/^[A-Z]{3}-?\d[A-Z0-9]\d{2}$/', $placa)) {
+        flash('err', 'Placa inválida. Use o formato ABC-1234 ou ABC1D23.');
+    } elseif ($ano < 1900 || $ano > (int)date('Y') + 1) {
+        flash('err', 'Ano inválido.');
+    } else {
+        try {
+            $idModelo = obter_modelo($idMarca, $modelo);
+            if (acao() === 'criar') {
+                db_exec('INSERT INTO veiculo (id, placa, ano, cor, idModelo, idCliente) VALUES (?,?,?,?,?,?)',
+                        [uuid(), $placa, $ano, mb_substr($cor, 0, 10), $idModelo, $u['id']]);
+                flash('ok', "Veículo $placa cadastrado com sucesso!");
+            } else {
+                db_exec('UPDATE veiculo SET placa=?, ano=?, cor=?, idModelo=? WHERE id=? AND idCliente=?',
+                        [$placa, $ano, mb_substr($cor, 0, 10), $idModelo, $id, $u['id']]);
+                flash('ok', "Veículo $placa atualizado.");
+            }
+        } catch (mysqli_sql_exception $ex) {
+            flash('err', erro_db($ex));
+        }
+    }
+    redirecionar('meus_veiculos.php');
+}
+
+if (acao() === 'excluir') {
+    $id = post('id');
+    if (db_val("SELECT 1 FROM protocolo WHERE idVeiculo = ? AND status IN ('ABERTO','EM_ATENDIMENTO')", [$id])) {
+        flash('err', 'Este veículo possui um atendimento em andamento e não pode ser removido agora.');
+    } else {
+        db_exec('DELETE FROM veiculo WHERE id = ? AND idCliente = ?', [$id, $u['id']]);
+        flash('ok', 'Veículo removido.');
+    }
+    redirecionar('meus_veiculos.php');
+}
+
+// ─── LEITURA ─────────────────────────────────────────────────────────────────
+$veiculos = db_all("SELECT v.id, v.placa, v.ano, v.cor, mo.nome AS modelo, ma.id AS idMarca, ma.nome AS marca,
+                           " . SQL_STATUS_ATIVO . " AS statusAtivo,
+                           (SELECT COUNT(*) FROM protocolo p WHERE p.idVeiculo = v.id) AS ocorrencias
+                    FROM veiculo v
+                    JOIN modelo mo ON mo.id = v.idModelo
+                    JOIN marca ma  ON ma.id = mo.idMarca
+                    WHERE v.idCliente = ? ORDER BY v.placa", [$u['id']]);
+$marcas = db_all('SELECT id, nome FROM marca ORDER BY nome');
+?>
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -192,60 +251,14 @@
   </style>
 </head>
 <body>
+<style>
+  a.btn-sm { text-decoration: none; text-align: center; color: inherit; }
+  .user-info { min-width: 0; }
+</style>
 
-<aside>
-  <div class="logo">
-    <div class="logo-mark">IMM</div>
-    <div class="logo-name">Integrated Mechanical<br>Management</div>
-  </div>
-  <nav>
-    <span class="nav-label">Principal</span>
-    <a class="nav-item" href="dashboard.html">
-      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
-      Meu Painel
-    </a>
-    <a class="nav-item active" href="#">
-      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 00-4 0v2M8 7V5a2 2 0 00-4 0v2"/><circle cx="12" cy="14" r="2"/></svg>
-      Meus Veículos
-    </a>
-    <a class="nav-item" href="visualizar_ocorrencias.html">
-      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 12h6m-6 4h6M9 8h6M5 21h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>
-      Ocorrências
-    </a>
-    <span class="nav-label">Registros</span>
-    <a class="nav-item" href="historico.html">
-      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-      Histórico
-    </a>
-    <span class="nav-label">Conta</span>
-    <a class="nav-item" href="perfil.html">
-      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
-      Meu Perfil
-    </a>
-  </nav>
-  <div class="sidebar-footer">
-    <div class="user-chip">
-      <div class="avatar">CS</div>
-      <div>
-        <div class="user-name">Cláudia Santos</div>
-        <div class="user-role">cliente</div>
-      </div>
-      <a class="nav-item" href="#">
-        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg>
-        Sair
-      </a>
-    </div>
-  </div>
-</aside>
+<?php sidebar('veiculos'); ?>
 
 <main>
-  <div class="topbar">
-    <div class="notif-btn">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 01-3.46 0"/></svg>
-      <span class="notif-dot"></span>
-    </div>
-  </div>
-
   <div class="page-header">
     <div>
       <div class="page-title">Meus Veículos</div>
@@ -259,83 +272,37 @@
 
   <div class="vehicles-grid">
 
-    <!-- Vehicle 1 -->
+    <?php foreach ($veiculos as $v): $st = status_veiculo($v['statusAtivo']); ?>
     <div class="vehicle-card">
       <div class="vehicle-card-top">
-        <div class="vehicle-plate">ABC-1234</div>
-        <div class="vehicle-name">Toyota Corolla</div>
-        <div class="vehicle-year">2019 · Prata</div>
+        <div class="vehicle-plate"><?= e($v['placa']) ?></div>
+        <div class="vehicle-name"><?= e($v['marca'] . ' ' . $v['modelo']) ?></div>
+        <div class="vehicle-year"><?= e($v['ano'] . ' · ' . $v['cor']) ?></div>
       </div>
       <div class="vehicle-card-body">
         <div class="vehicle-meta">
-          <div class="meta-item"><label>Marca</label><span>Toyota</span></div>
-          <div class="meta-item"><label>Modelo</label><span>Corolla</span></div>
-          <div class="meta-item"><label>Ano</label><span>2019</span></div>
-          <div class="meta-item"><label>Cor</label><span>Prata</span></div>
+          <div class="meta-item"><label>Marca</label><span><?= e($v['marca']) ?></span></div>
+          <div class="meta-item"><label>Modelo</label><span><?= e($v['modelo']) ?></span></div>
+          <div class="meta-item"><label>Ano</label><span><?= e($v['ano']) ?></span></div>
+          <div class="meta-item"><label>Cor</label><span><?= e($v['cor']) ?></span></div>
         </div>
         <div class="vehicle-status-row">
-          <span class="badge prog">Em serviço</span>
-          <span style="font-size:12px;color:var(--muted);font-family:'DM Mono',monospace">2 ocorrências</span>
+          <?= badge($st) ?>
+          <span style="font-size:12px;color:var(--muted);font-family:'DM Mono',monospace"><?= plural((int)$v['ocorrencias'], 'ocorrência', 'ocorrências') ?></span>
         </div>
         <div class="vehicle-actions">
-          <button class="btn-sm">Ver ocorrências</button>
-          <button class="btn-sm">Editar</button>
-          <button class="btn-sm danger">Remover</button>
+          <a class="btn-sm" href="visualizar_ocorrencias.php?v=<?= urlencode($v['id']) ?>">Ver ocorrências</a>
+          <button class="btn-sm" onclick='openModal(<?= json_encode($v, JSON_HEX_APOS | JSON_HEX_TAG) ?>)'>Editar</button>
+          <form method="POST" style="display:contents" onsubmit="return confirm('Remover o veículo <?= e($v['placa']) ?>? O histórico de ocorrências dele também será apagado.')">
+            <?= csrf_field() ?>
+            <input type="hidden" name="_action" value="excluir"/>
+            <input type="hidden" name="id" value="<?= e($v['id']) ?>"/>
+            <button class="btn-sm danger" type="submit">Remover</button>
+          </form>
         </div>
       </div>
     </div>
-
-    <!-- Vehicle 2 -->
-    <div class="vehicle-card">
-      <div class="vehicle-card-top">
-        <div class="vehicle-plate">GHI-9012</div>
-        <div class="vehicle-name">Honda Civic</div>
-        <div class="vehicle-year">2021 · Preto</div>
-      </div>
-      <div class="vehicle-card-body">
-        <div class="vehicle-meta">
-          <div class="meta-item"><label>Marca</label><span>Honda</span></div>
-          <div class="meta-item"><label>Modelo</label><span>Civic</span></div>
-          <div class="meta-item"><label>Ano</label><span>2021</span></div>
-          <div class="meta-item"><label>Cor</label><span>Preto</span></div>
-        </div>
-        <div class="vehicle-status-row">
-          <span class="badge open">Aguardando</span>
-          <span style="font-size:12px;color:var(--muted);font-family:'DM Mono',monospace">1 ocorrência</span>
-        </div>
-        <div class="vehicle-actions">
-          <button class="btn-sm">Ver ocorrências</button>
-          <button class="btn-sm">Editar</button>
-          <button class="btn-sm danger">Remover</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Vehicle 3 - done -->
-    <div class="vehicle-card">
-      <div class="vehicle-card-top">
-        <div class="vehicle-plate">DEF-5678</div>
-        <div class="vehicle-name">Volkswagen Gol</div>
-        <div class="vehicle-year">2015 · Branco</div>
-      </div>
-      <div class="vehicle-card-body">
-        <div class="vehicle-meta">
-          <div class="meta-item"><label>Marca</label><span>Volkswagen</span></div>
-          <div class="meta-item"><label>Modelo</label><span>Gol</span></div>
-          <div class="meta-item"><label>Ano</label><span>2015</span></div>
-          <div class="meta-item"><label>Cor</label><span>Branco</span></div>
-        </div>
-        <div class="vehicle-status-row">
-          <span class="badge done">Sem pendências</span>
-          <span style="font-size:12px;color:var(--muted);font-family:'DM Mono',monospace">0 ocorrências</span>
-        </div>
-        <div class="vehicle-actions">
-          <button class="btn-sm">Ver ocorrências</button>
-          <button class="btn-sm">Editar</button>
-          <button class="btn-sm danger">Remover</button>
-        </div>
-      </div>
-    </div>
+    <?php endforeach; ?>
 
     <!-- Add card -->
     <div class="vehicle-card add-card" onclick="openModal()">
@@ -349,59 +316,66 @@
   </div>
 </main>
 
-<!-- MODAL CADASTRAR VEÍCULO -->
+<!-- MODAL CADASTRAR / EDITAR VEÍCULO -->
 <div class="modal-backdrop" id="modal" onclick="closeModalOutside(event)">
-  <div class="modal">
+  <form class="modal" method="POST">
+    <?= csrf_field() ?>
+    <input type="hidden" name="_action" id="f-action" value="criar"/>
+    <input type="hidden" name="id" id="f-id" value=""/>
     <div class="modal-header">
-      <div class="modal-title">Cadastrar veículo</div>
-      <button class="modal-close" onclick="closeModal()">×</button>
+      <div class="modal-title" id="modal-title">Cadastrar veículo</div>
+      <button type="button" class="modal-close" onclick="closeModal()">×</button>
     </div>
 
     <div class="field">
       <label>Placa</label>
-      <input type="text" placeholder="ABC-1234" maxlength="8"/>
+      <input type="text" name="placa" id="f-placa" placeholder="ABC-1234" maxlength="8" style="text-transform:uppercase" required/>
     </div>
     <div class="field-row">
       <div class="field">
         <label>Marca</label>
-        <select>
+        <select name="idMarca" id="f-marca" required>
           <option value="">Selecione</option>
-          <option>Toyota</option>
-          <option>Honda</option>
-          <option>Volkswagen</option>
-          <option>Chevrolet</option>
-          <option>Ford</option>
-          <option>Hyundai</option>
-          <option>Fiat</option>
-          <option>Renault</option>
-          <option>Nissan</option>
+          <?php foreach ($marcas as $m): ?><option value="<?= e($m['id']) ?>"><?= e($m['nome']) ?></option><?php endforeach; ?>
         </select>
       </div>
       <div class="field">
         <label>Modelo</label>
-        <input type="text" placeholder="Ex: Corolla"/>
+        <input type="text" name="modelo" id="f-modelo" placeholder="Ex: Corolla" maxlength="100" required/>
       </div>
     </div>
     <div class="field-row">
       <div class="field">
         <label>Ano</label>
-        <input type="number" placeholder="2020" min="1900" max="2026"/>
+        <input type="number" name="ano" id="f-ano" placeholder="2020" min="1900" max="<?= date('Y') + 1 ?>" required/>
       </div>
       <div class="field">
         <label>Cor</label>
-        <input type="text" placeholder="Ex: Prata"/>
+        <input type="text" name="cor" id="f-cor" placeholder="Ex: Prata" maxlength="10" required/>
       </div>
     </div>
 
     <div class="modal-footer">
-      <button class="btn-cancel" onclick="closeModal()">Cancelar</button>
-      <button class="btn-confirm" onclick="closeModal()">Cadastrar veículo</button>
+      <button type="button" class="btn-cancel" onclick="closeModal()">Cancelar</button>
+      <button type="submit" class="btn-confirm" id="f-submit">Cadastrar veículo</button>
     </div>
-  </div>
+  </form>
 </div>
 
+<?php flash_html(); ?>
+
 <script>
-  function openModal() {
+  function openModal(v) {
+    const edit = !!v;
+    document.getElementById('modal-title').textContent = edit ? 'Editar veículo' : 'Cadastrar veículo';
+    document.getElementById('f-submit').textContent   = edit ? 'Salvar alterações' : 'Cadastrar veículo';
+    document.getElementById('f-action').value = edit ? 'editar' : 'criar';
+    document.getElementById('f-id').value     = edit ? v.id : '';
+    document.getElementById('f-placa').value  = edit ? v.placa : '';
+    document.getElementById('f-marca').value  = edit ? v.idMarca : '';
+    document.getElementById('f-modelo').value = edit ? v.modelo : '';
+    document.getElementById('f-ano').value    = edit ? v.ano : '';
+    document.getElementById('f-cor').value    = edit ? v.cor : '';
     document.getElementById('modal').classList.add('open');
   }
   function closeModal() {
@@ -410,6 +384,7 @@
   function closeModalOutside(e) {
     if (e.target === document.getElementById('modal')) closeModal();
   }
+  <?php if (isset($_GET['novo'])): ?>openModal();<?php endif; ?>
 </script>
 </body>
 </html>

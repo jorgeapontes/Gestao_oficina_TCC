@@ -1,3 +1,72 @@
+<?php
+require __DIR__ . '/../includes/app.php';
+$u = exigir_login(['CLIENTE']);
+
+// ─── DADOS PESSOAIS ──────────────────────────────────────────────────────────
+if (acao() === 'dados') {
+    $nome     = post('nome');
+    $email    = post('email');
+    $telefone = so_digitos(post('telefone'));
+    $endereco = post('endereco');
+
+    if (!$nome || !$email || !$endereco) {
+        flash('err', 'Preencha nome, e-mail e endereço.');
+    } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        flash('err', 'E-mail inválido.');
+    } elseif (db_val('SELECT 1 FROM colaborador WHERE email = ?', [$email])) {
+        flash('err', 'Já existe um cadastro com este e-mail.');
+    } else {
+        try {
+            db_exec('UPDATE cliente SET nome=?, email=?, telefone=?, endereco=? WHERE id=?',
+                    [$nome, $email, $telefone, $endereco, $u['id']]);
+            $_SESSION['user']['nome']  = $nome;
+            $_SESSION['user']['email'] = $email;
+            flash('ok', 'Dados atualizados com sucesso!');
+        } catch (mysqli_sql_exception $ex) {
+            flash('err', erro_db($ex));
+        }
+    }
+    redirecionar('perfil.php');
+}
+
+// ─── ALTERAR SENHA ───────────────────────────────────────────────────────────
+if (acao() === 'senha') {
+    $atual = $_POST['atual'] ?? '';
+    $nova  = $_POST['nova'] ?? '';
+    $hash  = db_val('SELECT senha FROM cliente WHERE id = ?', [$u['id']]);
+
+    if (!password_verify($atual, $hash)) {
+        flash('err', 'Senha atual incorreta.');
+    } elseif (strlen($nova) < 8) {
+        flash('err', 'A nova senha deve ter ao menos 8 caracteres.');
+    } elseif ($nova !== ($_POST['confirma'] ?? '')) {
+        flash('err', 'A confirmação não confere com a nova senha.');
+    } else {
+        db_exec('UPDATE cliente SET senha=? WHERE id=?', [password_hash($nova, PASSWORD_DEFAULT), $u['id']]);
+        flash('ok', 'Senha atualizada com sucesso!');
+    }
+    redirecionar('perfil.php');
+}
+
+// ─── EXCLUIR CONTA (LGPD) ────────────────────────────────────────────────────
+// Remove o cliente; veículos, ocorrências e protocolos saem junto (ON DELETE CASCADE).
+if (acao() === 'excluir_conta') {
+    if (db_val("SELECT 1 FROM protocolo p JOIN veiculo v ON v.id = p.idVeiculo
+                WHERE v.idCliente = ? AND p.status IN ('ABERTO','EM_ATENDIMENTO')", [$u['id']])) {
+        flash('err', 'Você possui atendimentos em andamento. Aguarde a finalização para excluir a conta.');
+        redirecionar('perfil.php');
+    }
+    db_exec('DELETE FROM cliente WHERE id = ?', [$u['id']]);
+    $_SESSION = [];
+    session_destroy();
+    redirecionar('../login.php');
+}
+
+$cliente      = db_one('SELECT nome, cpf, email, telefone, endereco FROM cliente WHERE id = ?', [$u['id']]);
+$nVeiculos    = (int)db_val('SELECT COUNT(*) FROM veiculo WHERE idCliente = ?', [$u['id']]);
+$nAtendimentos = (int)db_val("SELECT COUNT(*) FROM protocolo p JOIN veiculo v ON v.id = p.idVeiculo
+                              WHERE v.idCliente = ? AND p.status = 'FINALIZADO'", [$u['id']]);
+?>
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -302,72 +371,22 @@
   </style>
 </head>
 <body>
+<style>
+  .avatar { width: 32px; height: 32px; border-radius: 50%; background: var(--text); color: #fff; font-size: 12px; font-weight: 600; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  a.btn-danger { text-decoration: none; }
+  button.identity-link { width: 100%; border: none; background: none; font-family: inherit; cursor: pointer; text-align: left; }
+</style>
 
-<!-- SIDEBAR -->
-<aside>
-  <div class="logo">
-    <div class="logo-mark">IMM</div>
-    <div class="logo-name">Integrated Mechanical<br>Management</div>
-  </div>
-
-  <nav>
-    <span class="nav-label">Principal</span>
-    <a class="nav-item" href="dashboard.html">
-      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
-      Meu Painel
-    </a>
-    <a class="nav-item" href="meus_veiculos.html">
-      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 00-4 0v2M8 7V5a2 2 0 00-4 0v2"/><circle cx="12" cy="14" r="2"/></svg>
-      Meus Veículos
-    </a>
-    <a class="nav-item" href="visualizar_ocorrencias.html">
-      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 12h6m-6 4h6M9 8h6M5 21h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>
-      Ocorrências
-    </a>
-
-    <span class="nav-label">Registros</span>
-    <a class="nav-item" href="historico.html">
-      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-      Histórico
-    </a>
-
-    <span class="nav-label">Conta</span>
-    <a class="nav-item active" href="#">
-      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
-      Meu Perfil
-    </a>
-  </nav>
-
-  <div class="sidebar-footer">
-    <div class="user-chip">
-      <div class="avatar-sm">CS</div>
-      <div class="user-info">
-        <div class="user-name">Cláudia Souza</div>
-        <div class="user-role">Cliente</div>
-      </div>
-      <a class="nav-item" href="imm-login.html">
-        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg>
-        Sair
-      </a>
-    </div>
-  </div>
-</aside>
+<?php sidebar('perfil'); ?>
 
 <!-- MAIN -->
 <main>
-  <div class="topbar">
-    <div class="notif-btn">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 01-3.46 0"/></svg>
-      <div class="notif-dot"></div>
-    </div>
-  </div>
-
   <div class="page-header">
     <div>
       <div class="page-title">Meu Perfil</div>
       <div class="page-sub">Gerencie seus dados pessoais e preferências de conta</div>
     </div>
-    <div class="page-date">Quarta-feira, 13 mai 2026</div>
+    <div class="page-date"><?= data_hoje() ?></div>
   </div>
 
   <div class="profile-layout">
@@ -377,38 +396,38 @@
       <div class="identity-banner"></div>
       <div class="identity-body">
         <div class="avatar-wrap">
-          <div class="avatar-lg">CS</div>
+          <div class="avatar-lg"><?= e(initials($cliente['nome'])) ?></div>
         </div>
-        <div class="identity-name">Cláudia Souza</div>
-        <div class="identity-role">Cliente · desde jan 2025</div>
+        <div class="identity-name"><?= e($cliente['nome']) ?></div>
+        <div class="identity-role">Cliente</div>
 
         <div class="identity-stat-row">
           <div class="identity-stat">
-            <div class="identity-stat-val">2</div>
+            <div class="identity-stat-val"><?= $nVeiculos ?></div>
             <div class="identity-stat-label">Veículos</div>
           </div>
           <div class="identity-stat">
-            <div class="identity-stat-val">6</div>
+            <div class="identity-stat-val"><?= $nAtendimentos ?></div>
             <div class="identity-stat-label">Atendimentos</div>
           </div>
         </div>
 
         <div class="identity-links">
-          <a class="identity-link" href="#">
+          <a class="identity-link" href="meus_veiculos.php">
             <div class="identity-link-left">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 00-4 0v2M8 7V5a2 2 0 00-4 0v2"/><circle cx="12" cy="14" r="2"/></svg>
               Meus Veículos
             </div>
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
           </a>
-          <a class="identity-link" href="#">
+          <a class="identity-link" href="historico.php">
             <div class="identity-link-left">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
               Histórico
             </div>
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
           </a>
-          <a class="identity-link danger" href="#">
+          <a class="identity-link danger" href="../logout.php">
             <div class="identity-link-left">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></svg>
               Sair da conta
@@ -422,13 +441,15 @@
     <div class="sections">
 
       <!-- dados pessoais -->
-      <div class="section-card">
+      <form class="section-card" method="POST">
+        <?= csrf_field() ?>
+        <input type="hidden" name="_action" value="dados"/>
         <div class="section-header">
           <div>
             <div class="section-title">Dados Pessoais</div>
             <div class="section-sub">Informações do seu cadastro</div>
           </div>
-          <button class="edit-btn" onclick="toggleEdit('dados')">
+          <button type="button" class="edit-btn" onclick="toggleEdit('dados')">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
             Editar
           </button>
@@ -438,66 +459,65 @@
           <div id="dados-view" class="fields-grid">
             <div class="field-group">
               <div class="field-label">Nome completo</div>
-              <div class="field-value">Cláudia Souza</div>
+              <div class="field-value"><?= e($cliente['nome']) ?></div>
             </div>
             <div class="field-group">
               <div class="field-label">CPF</div>
-              <div class="field-value" style="font-family:'DM Mono',monospace;font-size:13px">123.456.789-00</div>
+              <div class="field-value" style="font-family:'DM Mono',monospace;font-size:13px"><?= e(fmt_cpf($cliente['cpf'])) ?></div>
             </div>
             <div class="field-group">
               <div class="field-label">E-mail</div>
-              <div class="field-value" style="display:flex;align-items:center;justify-content:space-between">
-                <span>claudia.souza@email.com</span>
-                <span class="badge verified">Verificado</span>
-              </div>
+              <div class="field-value"><?= e($cliente['email']) ?></div>
             </div>
             <div class="field-group">
               <div class="field-label">Telefone</div>
-              <div class="field-value">(11) 99234-5678</div>
+              <div class="field-value"><?= e(fmt_tel($cliente['telefone'])) ?></div>
             </div>
             <div class="field-group full">
               <div class="field-label">Endereço</div>
-              <div class="field-value">Rua das Acácias, 274 – Jd. Botânico, Jundiaí – SP, 13210-000</div>
+              <div class="field-value"><?= e($cliente['endereco']) ?></div>
             </div>
           </div>
           <!-- edit mode (hidden) -->
           <div id="dados-edit" class="fields-grid" style="display:none">
             <div class="field-group">
               <div class="field-label">Nome completo</div>
-              <input class="field-input" type="text" value="Cláudia Souza"/>
+              <input class="field-input" type="text" name="nome" value="<?= e($cliente['nome']) ?>" maxlength="100" required/>
             </div>
             <div class="field-group">
               <div class="field-label">CPF <span style="color:var(--muted);font-size:10.5px;font-weight:400">(não editável)</span></div>
-              <input class="field-input mono" type="text" value="123.456.789-00" disabled style="opacity:0.5;cursor:not-allowed"/>
+              <input class="field-input mono" type="text" value="<?= e(fmt_cpf($cliente['cpf'])) ?>" disabled style="opacity:0.5;cursor:not-allowed"/>
             </div>
             <div class="field-group">
               <div class="field-label">E-mail</div>
-              <input class="field-input" type="email" value="claudia.souza@email.com"/>
+              <input class="field-input" type="email" name="email" value="<?= e($cliente['email']) ?>" maxlength="100" required/>
             </div>
             <div class="field-group">
               <div class="field-label">Telefone</div>
-              <input class="field-input" type="tel" value="(11) 99234-5678"/>
+              <input class="field-input" type="tel" name="telefone" id="f-tel" value="<?= e(fmt_tel($cliente['telefone']) === '—' ? '' : fmt_tel($cliente['telefone'])) ?>" maxlength="15"/>
             </div>
             <div class="field-group full">
               <div class="field-label">Endereço</div>
-              <input class="field-input" type="text" value="Rua das Acácias, 274 – Jd. Botânico, Jundiaí – SP, 13210-000"/>
+              <input class="field-input" type="text" name="endereco" value="<?= e($cliente['endereco']) ?>" maxlength="100" required/>
             </div>
           </div>
         </div>
         <div id="dados-footer" class="section-footer" style="display:none">
-          <button class="btn-ghost" onclick="cancelEdit('dados')">Cancelar</button>
-          <button class="btn-primary">Salvar alterações</button>
+          <button type="button" class="btn-ghost" onclick="cancelEdit('dados')">Cancelar</button>
+          <button type="submit" class="btn-primary">Salvar alterações</button>
         </div>
-      </div>
+      </form>
 
       <!-- segurança -->
-      <div class="section-card">
+      <form class="section-card" method="POST">
+        <?= csrf_field() ?>
+        <input type="hidden" name="_action" value="senha"/>
         <div class="section-header">
           <div>
             <div class="section-title">Segurança</div>
             <div class="section-sub">Senha e acesso à conta</div>
           </div>
-          <button class="edit-btn" onclick="toggleEdit('senha')">
+          <button type="button" class="edit-btn" onclick="toggleEdit('senha')">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
             Alterar senha
           </button>
@@ -509,16 +529,16 @@
               <div class="field-value" style="letter-spacing:0.15em;color:var(--muted)">••••••••••</div>
             </div>
             <div class="field-group">
-              <div class="field-label">Última alteração</div>
-              <div class="field-value">14 jan 2025</div>
+              <div class="field-label">Acesso</div>
+              <div class="field-value"><?= e($cliente['email']) ?></div>
             </div>
           </div>
           <div id="senha-edit" class="fields-grid" style="display:none">
             <div class="field-group full">
               <div class="field-label">Senha atual</div>
               <div class="password-field-wrap">
-                <input class="field-input" type="password" placeholder="Digite sua senha atual"/>
-                <button class="password-toggle" type="button">
+                <input class="field-input" type="password" name="atual" placeholder="Digite sua senha atual"/>
+                <button class="password-toggle" type="button" onclick="togglePass(this)">
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                 </button>
               </div>
@@ -526,8 +546,8 @@
             <div class="field-group">
               <div class="field-label">Nova senha</div>
               <div class="password-field-wrap">
-                <input class="field-input" type="password" placeholder="Mínimo 8 caracteres"/>
-                <button class="password-toggle" type="button">
+                <input class="field-input" type="password" name="nova" placeholder="Mínimo 8 caracteres" minlength="8"/>
+                <button class="password-toggle" type="button" onclick="togglePass(this)">
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                 </button>
               </div>
@@ -535,8 +555,8 @@
             <div class="field-group">
               <div class="field-label">Confirmar nova senha</div>
               <div class="password-field-wrap">
-                <input class="field-input" type="password" placeholder="Repita a nova senha"/>
-                <button class="password-toggle" type="button">
+                <input class="field-input" type="password" name="confirma" placeholder="Repita a nova senha" minlength="8"/>
+                <button class="password-toggle" type="button" onclick="togglePass(this)">
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                 </button>
               </div>
@@ -544,10 +564,10 @@
           </div>
         </div>
         <div id="senha-footer" class="section-footer" style="display:none">
-          <button class="btn-ghost" onclick="cancelEdit('senha')">Cancelar</button>
-          <button class="btn-primary">Atualizar senha</button>
+          <button type="button" class="btn-ghost" onclick="cancelEdit('senha')">Cancelar</button>
+          <button type="submit" class="btn-primary">Atualizar senha</button>
         </div>
-      </div>
+      </form>
 
       <!-- danger zone -->
       <div class="section-card">
@@ -563,14 +583,18 @@
               <div class="danger-item-text">Excluir um veículo</div>
               <div class="danger-item-sub">Remove permanentemente o veículo e seu histórico de ocorrências</div>
             </div>
-            <button class="btn-danger">Gerenciar veículos</button>
+            <a class="btn-danger" href="meus_veiculos.php">Gerenciar veículos</a>
           </div>
           <div class="danger-item">
             <div>
               <div class="danger-item-text">Excluir minha conta</div>
               <div class="danger-item-sub">Remove permanentemente seus dados pessoais do sistema (LGPD)</div>
             </div>
-            <button class="btn-danger">Excluir conta</button>
+            <form method="POST" onsubmit="return confirm('Excluir sua conta permanentemente? Seus veículos e histórico também serão apagados. Esta ação não pode ser desfeita.')">
+              <?= csrf_field() ?>
+              <input type="hidden" name="_action" value="excluir_conta"/>
+              <button type="submit" class="btn-danger">Excluir conta</button>
+            </form>
           </div>
         </div>
       </div>
@@ -579,23 +603,32 @@
   </div>
 </main>
 
+<?php flash_html(); ?>
+
 <script>
   function toggleEdit(section) {
-    const view = document.getElementById(section + '-view');
-    const edit = document.getElementById(section + '-edit');
-    const footer = document.getElementById(section + '-footer');
-    view.style.display = 'none';
-    edit.style.display = 'grid';
-    footer.style.display = 'flex';
+    document.getElementById(section + '-view').style.display = 'none';
+    document.getElementById(section + '-edit').style.display = 'grid';
+    document.getElementById(section + '-footer').style.display = 'flex';
+    if (section === 'senha') document.querySelectorAll('#senha-edit input').forEach(i => i.required = true);
   }
   function cancelEdit(section) {
-    const view = document.getElementById(section + '-view');
-    const edit = document.getElementById(section + '-edit');
-    const footer = document.getElementById(section + '-footer');
-    view.style.display = 'grid';
-    edit.style.display = 'none';
-    footer.style.display = 'none';
+    document.getElementById(section + '-view').style.display = 'grid';
+    document.getElementById(section + '-edit').style.display = 'none';
+    document.getElementById(section + '-footer').style.display = 'none';
+    if (section === 'senha') document.querySelectorAll('#senha-edit input').forEach(i => { i.required = false; i.value = ''; });
   }
+  function togglePass(btn) {
+    const input = btn.parentElement.querySelector('input');
+    input.type = input.type === 'password' ? 'text' : 'password';
+  }
+  document.getElementById('f-tel').addEventListener('input', function() {
+    let v = this.value.replace(/\D/g,'').substring(0, 11);
+    if (v.length > 10)     v = v.replace(/(\d{2})(\d{5})(\d{4})/, '($1) $2-$3');
+    else if (v.length > 6) v = v.replace(/(\d{2})(\d{4})(\d+)/, '($1) $2-$3');
+    else if (v.length > 2) v = v.replace(/(\d{2})(\d+)/, '($1) $2');
+    this.value = v;
+  });
 </script>
 </body>
 </html>

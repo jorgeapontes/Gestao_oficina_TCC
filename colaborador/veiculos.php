@@ -1,3 +1,77 @@
+<?php
+require __DIR__ . '/../includes/app.php';
+$u = exigir_login(['COLABORADOR', 'ADMIN']);
+
+// ─── CRUD ────────────────────────────────────────────────────────────────────
+if (in_array(acao(), ['criar', 'editar'], true)) {
+    $id        = post('id');
+    $idCliente = post('idCliente');
+    $placa     = normalizar_placa(post('placa'));
+    $idMarca   = post('idMarca');
+    $modelo    = post('modelo');
+    $ano       = (int)post('ano');
+    $cor       = post('cor');
+
+    if (!$idCliente || !$placa || !$idMarca || !$modelo || !$cor || !$ano) {
+        flash('err', 'Preencha todos os campos.');
+    } elseif (!preg_match('/^[A-Z]{3}-?\d[A-Z0-9]\d{2}$/', $placa)) {
+        flash('err', 'Placa inválida. Use o formato ABC-1234 ou ABC1D23.');
+    } elseif ($ano < 1900 || $ano > (int)date('Y') + 1) {
+        flash('err', 'Ano inválido.');
+    } else {
+        try {
+            $idModelo = obter_modelo($idMarca, $modelo);
+            if (acao() === 'criar') {
+                db_exec('INSERT INTO veiculo (id, placa, ano, cor, idModelo, idCliente) VALUES (?,?,?,?,?,?)',
+                        [uuid(), $placa, $ano, mb_substr($cor, 0, 10), $idModelo, $idCliente]);
+                flash('ok', "Veículo $placa cadastrado com sucesso!");
+            } else {
+                db_exec('UPDATE veiculo SET placa=?, ano=?, cor=?, idModelo=?, idCliente=? WHERE id=?',
+                        [$placa, $ano, mb_substr($cor, 0, 10), $idModelo, $idCliente, $id]);
+                flash('ok', "Veículo $placa atualizado.");
+            }
+        } catch (mysqli_sql_exception $ex) {
+            flash('err', erro_db($ex));
+        }
+    }
+    redirecionar('veiculos.php');
+}
+
+// Remover veículo apaga também suas ocorrências e protocolos (ON DELETE CASCADE),
+// por isso fica restrito ao administrador.
+if (acao() === 'excluir' && e_admin()) {
+    db_exec('DELETE FROM veiculo WHERE id = ?', [post('id')]);
+    flash('ok', 'Veículo removido.');
+    redirecionar('veiculos.php');
+}
+
+// ─── LEITURA ─────────────────────────────────────────────────────────────────
+$busca     = trim($_GET['q'] ?? '');
+$idCliente = $_GET['cliente'] ?? '';
+$where = [];
+$params = [];
+if ($idCliente !== '') { $where[] = 'v.idCliente = ?'; $params[] = $idCliente; }
+
+$veiculos = db_all("SELECT v.id, v.placa, v.ano, v.cor, v.idCliente, mo.nome AS modelo, ma.id AS idMarca, ma.nome AS marca,
+                           c.nome AS cliente, c.cpf,
+                           " . SQL_STATUS_ATIVO . " AS statusAtivo,
+                           (SELECT p.numero FROM protocolo p WHERE p.idVeiculo = v.id
+                            AND p.status IN ('ABERTO','EM_ATENDIMENTO') ORDER BY p.numero DESC LIMIT 1) AS protocoloAtivo,
+                           (SELECT COUNT(*) FROM itemocorrencia i JOIN protocolo p ON p.idOcorrencia = i.idOcorrencia
+                            WHERE p.idVeiculo = v.id AND p.status IN ('ABERTO','EM_ATENDIMENTO')) AS itensAtivos
+                    FROM veiculo v
+                    JOIN modelo mo ON mo.id = v.idModelo
+                    JOIN marca ma  ON ma.id = mo.idMarca
+                    JOIN cliente c ON c.id = v.idCliente"
+                  . ($where ? ' WHERE ' . implode(' AND ', $where) : '') . ' ORDER BY v.placa', $params);
+
+$marcas   = db_all('SELECT id, nome FROM marca ORDER BY nome');
+$clientes = db_all('SELECT id, nome, cpf FROM cliente ORDER BY nome');
+$filtroCliente = $idCliente !== '' ? db_val('SELECT nome FROM cliente WHERE id = ?', [$idCliente]) : null;
+
+$abrirNovo  = isset($_GET['novo']);
+$placaNovo  = normalizar_placa($_GET['placa'] ?? '');
+?>
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -105,59 +179,21 @@
   </style>
 </head>
 <body>
+<style>
+  .act-btn { text-decoration: none; display: inline-block; }
+  .act-btn.danger:hover { border-color: #C0392B; color: #C0392B; }
+  .filter-chip-client { display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--muted); margin-left: 6px; }
+  .filter-chip-client a { color: var(--text); text-decoration: none; font-weight: 500; }
+  .empty-row td { text-align: center; color: var(--muted); padding: 40px 22px; }
+</style>
 
-<aside>
-  <div class="logo">
-    <div class="logo-mark">IMM</div>
-    <div class="logo-name">Integrated Mechanical<br>Management</div>
-  </div>
-  <nav>
-    <span class="nav-label">Principal</span>
-    <a class="nav-item" href="dashboard.html">
-      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
-      Meu Painel
-    </a>
-    <a class="nav-item" href="registrar_ocorrencia.html">
-      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 12h6m-6 4h6M9 8h6M5 21h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>
-      Ocorrências
-    </a>
-    <a class="nav-item" href="visualizar_clientes.html">
-      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
-      Clientes
-    </a>
-    <a class="nav-item active" href="#">
-      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 00-4 0v2M8 7V5a2 2 0 00-4 0v2"/><circle cx="12" cy="14" r="2"/></svg>
-      Veículos
-    </a>
-    <span class="nav-label">Registros</span>
-    <a class="nav-item" href="../admin/historico.html">
-      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-      Histórico
-    </a>
-  </nav>
-  <div class="sidebar-footer">
-    <div class="user-chip">
-      <div class="avatar">CM</div>
-      <div>
-        <div class="user-name">Carlos Mendes</div>
-        <div class="user-role">colaborador</div>
-      </div>
-       <a class="nav-item" href="imm-login.html">
-        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg>
-        Sair
-      </a>
-    </div>
-  </div>
-</aside>
+<?php sidebar('veiculos'); ?>
 
 <main>
   <div class="topbar">
     <div class="search-wrap">
       <svg class="search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
-      <input class="search-input" type="text" placeholder="Buscar por placa, modelo ou cliente..." oninput="filterTable(this.value)"/>
-    </div>
-    <div class="notif-btn">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 01-3.46 0"/></svg>
+      <input class="search-input" type="text" id="search" value="<?= e($busca) ?>" placeholder="Buscar por placa, modelo ou cliente..." oninput="filterTable(this.value)"/>
     </div>
   </div>
 
@@ -178,7 +214,10 @@
       <button class="filter-btn" onclick="setFilter('prog',this)">Em serviço</button>
       <button class="filter-btn" onclick="setFilter('open',this)">Aguardando</button>
       <button class="filter-btn" onclick="setFilter('done',this)">Sem pendências</button>
-      <span class="table-count" id="vcount">7 veículos</span>
+      <?php if ($filtroCliente): ?>
+        <span class="filter-chip-client">Cliente: <strong><?= e($filtroCliente) ?></strong> <a href="veiculos.php" title="Remover filtro">✕</a></span>
+      <?php endif; ?>
+      <span class="table-count" id="vcount"><?= plural(count($veiculos), 'veículo', 'veículos') ?></span>
     </div>
 
     <table>
@@ -189,134 +228,101 @@
           <th>Ano / Cor</th>
           <th>Proprietário</th>
           <th>Status</th>
-          <th>Ocorrências</th>
+          <th>Itens ativos</th>
           <th></th>
         </tr>
       </thead>
       <tbody id="vtable-body">
-        <tr data-status="prog">
-          <td><span class="td-plate">ABC-1234</span></td>
-          <td>Toyota Corolla</td>
-          <td>2019 · Prata</td>
-          <td><div class="owner-chip"><div class="o-avatar">CS</div>Cláudia Santos</div></td>
-          <td><span class="badge prog">Em serviço</span></td>
-          <td style="font-family:'DM Mono',monospace;font-size:12.5px;">2 ativas</td>
-          <td><div class="row-actions"><button class="act-btn">Ocorrências</button><button class="act-btn">Finalizar</button></div></td>
+        <?php if (!$veiculos): ?>
+          <tr class="empty-row"><td colspan="7">Nenhum veículo cadastrado.</td></tr>
+        <?php endif; ?>
+        <?php foreach ($veiculos as $v): $st = status_veiculo($v['statusAtivo']); ?>
+        <tr data-status="<?= $st[0] ?>">
+          <td><span class="td-plate"><?= e($v['placa']) ?></span></td>
+          <td><?= e($v['marca'] . ' ' . $v['modelo']) ?></td>
+          <td><?= e($v['ano'] . ' · ' . $v['cor']) ?></td>
+          <td><div class="owner-chip"><div class="o-avatar"><?= e(initials($v['cliente'])) ?></div><?= e($v['cliente']) ?></div></td>
+          <td><?= badge($st) ?></td>
+          <td style="font-family:'DM Mono',monospace;font-size:12.5px;"><?= (int)$v['itensAtivos'] ?></td>
+          <td><div class="row-actions">
+            <?php if ($v['protocoloAtivo']): ?>
+              <a class="act-btn" href="atendimento.php?numero=<?= (int)$v['protocoloAtivo'] ?>">Atendimento</a>
+            <?php else: ?>
+              <a class="act-btn" href="registrar_ocorrencia.php?placa=<?= urlencode($v['placa']) ?>">Nova ocorrência</a>
+            <?php endif; ?>
+            <a class="act-btn" href="../admin/historico.php?q=<?= urlencode($v['placa']) ?>">Histórico</a>
+            <button class="act-btn" onclick='openModal(<?= json_encode($v, JSON_HEX_APOS | JSON_HEX_TAG) ?>)'>Editar</button>
+            <?php if (e_admin()): ?>
+              <form method="POST" style="display:inline" onsubmit="return confirm('Remover o veículo <?= e($v['placa']) ?>? Ocorrências e protocolos dele também serão apagados.')">
+                <?= csrf_field() ?>
+                <input type="hidden" name="_action" value="excluir"/>
+                <input type="hidden" name="id" value="<?= e($v['id']) ?>"/>
+                <button class="act-btn danger" type="submit">Remover</button>
+              </form>
+            <?php endif; ?>
+          </div></td>
         </tr>
-        <tr data-status="open">
-          <td><span class="td-plate">GHI-9012</span></td>
-          <td>Honda Civic</td>
-          <td>2021 · Preto</td>
-          <td><div class="owner-chip"><div class="o-avatar">CS</div>Cláudia Santos</div></td>
-          <td><span class="badge open">Aguardando</span></td>
-          <td style="font-family:'DM Mono',monospace;font-size:12.5px;">1 ativa</td>
-          <td><div class="row-actions"><button class="act-btn">Ocorrências</button><button class="act-btn">Finalizar</button></div></td>
-        </tr>
-        <tr data-status="done">
-          <td><span class="td-plate">DEF-5678</span></td>
-          <td>Volkswagen Gol</td>
-          <td>2015 · Branco</td>
-          <td><div class="owner-chip"><div class="o-avatar">CS</div>Cláudia Santos</div></td>
-          <td><span class="badge done">Sem pendências</span></td>
-          <td style="font-family:'DM Mono',monospace;font-size:12.5px;">0 ativas</td>
-          <td><div class="row-actions"><button class="act-btn">Ocorrências</button><button class="act-btn">Editar</button></div></td>
-        </tr>
-        <tr data-status="open">
-          <td><span class="td-plate">JKL-3456</span></td>
-          <td>Chevrolet Onix</td>
-          <td>2022 · Branco</td>
-          <td><div class="owner-chip"><div class="o-avatar">MF</div>Marcos Ferreira</div></td>
-          <td><span class="badge open">Aguardando</span></td>
-          <td style="font-family:'DM Mono',monospace;font-size:12.5px;">1 ativa</td>
-          <td><div class="row-actions"><button class="act-btn">Ocorrências</button><button class="act-btn">Finalizar</button></div></td>
-        </tr>
-        <tr data-status="prog">
-          <td><span class="td-plate">MNO-7890</span></td>
-          <td>Fiat Pulse</td>
-          <td>2023 · Vermelho</td>
-          <td><div class="owner-chip"><div class="o-avatar">AR</div>Ana Rodrigues</div></td>
-          <td><span class="badge prog">Em serviço</span></td>
-          <td style="font-family:'DM Mono',monospace;font-size:12.5px;">3 ativas</td>
-          <td><div class="row-actions"><button class="act-btn">Ocorrências</button><button class="act-btn">Finalizar</button></div></td>
-        </tr>
-        <tr data-status="done">
-          <td><span class="td-plate">PQR-1122</span></td>
-          <td>Hyundai HB20</td>
-          <td>2020 · Cinza</td>
-          <td><div class="owner-chip"><div class="o-avatar">JP</div>Jorge Pereira</div></td>
-          <td><span class="badge done">Sem pendências</span></td>
-          <td style="font-family:'DM Mono',monospace;font-size:12.5px;">0 ativas</td>
-          <td><div class="row-actions"><button class="act-btn">Ocorrências</button><button class="act-btn">Editar</button></div></td>
-        </tr>
-        <tr data-status="open">
-          <td><span class="td-plate">STU-3344</span></td>
-          <td>Renault Kwid</td>
-          <td>2018 · Azul</td>
-          <td><div class="owner-chip"><div class="o-avatar">LA</div>Luísa Almeida</div></td>
-          <td><span class="badge open">Aguardando</span></td>
-          <td style="font-family:'DM Mono',monospace;font-size:12.5px;">1 ativa</td>
-          <td><div class="row-actions"><button class="act-btn">Ocorrências</button><button class="act-btn">Finalizar</button></div></td>
-        </tr>
+        <?php endforeach; ?>
       </tbody>
     </table>
-
-    <div class="pagination">
-      <span class="page-info">Mostrando 7 de 7</span>
-      <div class="page-btns">
-        <button class="page-btn">‹</button>
-        <button class="page-btn current">1</button>
-        <button class="page-btn">›</button>
-      </div>
-    </div>
   </div>
 </main>
 
 <!-- MODAL -->
 <div class="modal-backdrop" id="modal" onclick="closeModalOutside(event)">
-  <div class="modal">
+  <form class="modal" method="POST">
+    <?= csrf_field() ?>
+    <input type="hidden" name="_action" id="f-action" value="criar"/>
+    <input type="hidden" name="id" id="f-id" value=""/>
     <div class="modal-header">
-      <div class="modal-title">Cadastrar veículo</div>
-      <button class="modal-close" onclick="closeModal()">×</button>
+      <div class="modal-title" id="modal-title">Cadastrar veículo</div>
+      <button type="button" class="modal-close" onclick="closeModal()">×</button>
     </div>
     <div class="field">
-      <label>Buscar cliente (nome ou CPF)</label>
-      <input type="text" placeholder="Ex: Cláudia Santos ou 123.456..."/>
+      <label>Cliente proprietário</label>
+      <select name="idCliente" id="f-cliente" required>
+        <option value="">Selecione o cliente</option>
+        <?php foreach ($clientes as $c): ?>
+          <option value="<?= e($c['id']) ?>"><?= e($c['nome']) ?> — <?= e(fmt_cpf($c['cpf'])) ?></option>
+        <?php endforeach; ?>
+      </select>
+      <?php if (!$clientes): ?><div style="font-size:12px;color:var(--muted);margin-top:6px">Nenhum cliente cadastrado. <a href="visualizar_clientes.php?novo=1">Cadastrar cliente</a></div><?php endif; ?>
     </div>
     <div class="field">
       <label>Placa</label>
-      <input type="text" placeholder="ABC-1234" maxlength="8"/>
+      <input type="text" name="placa" id="f-placa" placeholder="ABC-1234" maxlength="8" style="text-transform:uppercase" required/>
     </div>
     <div class="field-row">
       <div class="field">
         <label>Marca</label>
-        <select>
+        <select name="idMarca" id="f-marca" required>
           <option value="">Selecione</option>
-          <option>Toyota</option><option>Honda</option><option>Volkswagen</option>
-          <option>Chevrolet</option><option>Ford</option><option>Hyundai</option>
-          <option>Fiat</option><option>Renault</option><option>Nissan</option>
+          <?php foreach ($marcas as $m): ?><option value="<?= e($m['id']) ?>"><?= e($m['nome']) ?></option><?php endforeach; ?>
         </select>
       </div>
       <div class="field">
         <label>Modelo</label>
-        <input type="text" placeholder="Ex: Corolla"/>
+        <input type="text" name="modelo" id="f-modelo" placeholder="Ex: Corolla" maxlength="100" required/>
       </div>
     </div>
     <div class="field-row">
       <div class="field">
         <label>Ano</label>
-        <input type="number" placeholder="2020" min="1900" max="2026"/>
+        <input type="number" name="ano" id="f-ano" placeholder="2020" min="1900" max="<?= date('Y') + 1 ?>" required/>
       </div>
       <div class="field">
         <label>Cor</label>
-        <input type="text" placeholder="Ex: Prata"/>
+        <input type="text" name="cor" id="f-cor" placeholder="Ex: Prata" maxlength="10" required/>
       </div>
     </div>
     <div class="modal-footer">
-      <button class="btn-cancel" onclick="closeModal()">Cancelar</button>
-      <button class="btn-confirm" onclick="closeModal()">Cadastrar veículo</button>
+      <button type="button" class="btn-cancel" onclick="closeModal()">Cancelar</button>
+      <button type="submit" class="btn-confirm" id="f-submit">Cadastrar veículo</button>
     </div>
-  </div>
+  </form>
 </div>
+
+<?php flash_html(); ?>
 
 <script>
   let currentFilter = 'all';
@@ -330,7 +336,7 @@
   }
   function filterTable(val) { searchTerm = val.toLowerCase(); applyFilters(); }
   function applyFilters() {
-    const rows = document.querySelectorAll('#vtable-body tr');
+    const rows = document.querySelectorAll('#vtable-body tr[data-status]');
     let visible = 0;
     rows.forEach(r => {
       const matchFilter = currentFilter === 'all' || r.dataset.status === currentFilter;
@@ -341,9 +347,30 @@
     });
     document.getElementById('vcount').textContent = visible + ' veículo' + (visible !== 1 ? 's' : '');
   }
-  function openModal() { document.getElementById('modal').classList.add('open'); }
+
+  function openModal(v) {
+    const edit = !!v;
+    document.getElementById('modal-title').textContent = edit ? 'Editar veículo' : 'Cadastrar veículo';
+    document.getElementById('f-submit').textContent   = edit ? 'Salvar alterações' : 'Cadastrar veículo';
+    document.getElementById('f-action').value  = edit ? 'editar' : 'criar';
+    document.getElementById('f-id').value      = edit ? v.id : '';
+    document.getElementById('f-cliente').value = edit ? v.idCliente : '';
+    document.getElementById('f-placa').value   = edit ? v.placa : '';
+    document.getElementById('f-marca').value   = edit ? v.idMarca : '';
+    document.getElementById('f-modelo').value  = edit ? v.modelo : '';
+    document.getElementById('f-ano').value     = edit ? v.ano : '';
+    document.getElementById('f-cor').value     = edit ? v.cor : '';
+    document.getElementById('modal').classList.add('open');
+  }
   function closeModal() { document.getElementById('modal').classList.remove('open'); }
   function closeModalOutside(e) { if (e.target === document.getElementById('modal')) closeModal(); }
+
+  <?php if ($busca !== ''): ?>filterTable(<?= json_encode($busca) ?>);<?php endif; ?>
+  <?php if ($abrirNovo): ?>
+    openModal();
+    document.getElementById('f-placa').value = <?= json_encode($placaNovo) ?>;
+    <?php if ($idCliente !== ''): ?>document.getElementById('f-cliente').value = <?= json_encode($idCliente) ?>;<?php endif; ?>
+  <?php endif; ?>
 </script>
 </body>
 </html>

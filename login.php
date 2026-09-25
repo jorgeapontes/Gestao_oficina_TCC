@@ -1,3 +1,78 @@
+<?php
+require __DIR__ . '/includes/app.php';
+
+// Já logado: vai direto para o painel do perfil.
+if (usuario()) redirecionar(home_do_perfil(usuario()['perfil']));
+verificar_csrf();
+
+$aba      = 'login';
+$erroLogin = '';
+$erroCad   = '';
+$old       = [];
+
+// ─── LOGIN ───────────────────────────────────────────────────────────────────
+// Procura primeiro em colaborador (perfil COLABORADOR/ADMIN), depois em cliente.
+if (acao() === 'login') {
+    $email = post('email');
+    $senha = $_POST['senha'] ?? '';
+    $old['login_email'] = $email;
+
+    if ($email === '' || $senha === '') {
+        $erroLogin = 'Preencha todos os campos.';
+    } else {
+        $u = db_one('SELECT id, nome, email, senha, cargo, perfil FROM colaborador WHERE email = ?', [$email]);
+        if (!$u) {
+            $u = db_one("SELECT id, nome, email, senha, '' AS cargo, 'CLIENTE' AS perfil FROM cliente WHERE email = ?", [$email]);
+        }
+        if ($u && password_verify($senha, $u['senha'])) {
+            session_regenerate_id(true);
+            unset($u['senha']);
+            $_SESSION['user'] = $u;
+            redirecionar(home_do_perfil($u['perfil']));
+        }
+        $erroLogin = 'E-mail ou senha incorretos. Tente novamente.';
+    }
+}
+
+// ─── CADASTRO DE CLIENTE ─────────────────────────────────────────────────────
+if (acao() === 'cadastro') {
+    $aba = 'register';
+    $old = [
+        'nome' => post('nome'), 'cpf' => post('cpf'), 'email' => post('email'),
+        'telefone' => post('telefone'), 'endereco' => post('endereco'),
+    ];
+    $cpf   = so_digitos($old['cpf']);
+    $senha = $_POST['senha'] ?? '';
+
+    if (!$old['nome'] || !$cpf || !$old['email'] || !$old['telefone'] || !$old['endereco'] || $senha === '') {
+        $erroCad = 'Preencha todos os campos obrigatórios.';
+    } elseif (strlen($cpf) !== 11) {
+        $erroCad = 'CPF inválido: informe os 11 dígitos.';
+    } elseif (!filter_var($old['email'], FILTER_VALIDATE_EMAIL)) {
+        $erroCad = 'E-mail inválido.';
+    } elseif ($senha !== ($_POST['senha2'] ?? '')) {
+        $erroCad = 'As senhas não conferem.';
+    } elseif (strlen($senha) < 8) {
+        $erroCad = 'A senha deve ter ao menos 8 caracteres.';
+    } elseif (db_val('SELECT 1 FROM colaborador WHERE email = ?', [$old['email']])) {
+        $erroCad = 'Já existe um cadastro com este e-mail.';
+    } else {
+        try {
+            $id = uuid();
+            db_exec('INSERT INTO cliente (id, nome, cpf, email, senha, telefone, endereco) VALUES (?,?,?,?,?,?,?)', [
+                $id, $old['nome'], $cpf, $old['email'], password_hash($senha, PASSWORD_DEFAULT),
+                so_digitos($old['telefone']), $old['endereco'],
+            ]);
+            session_regenerate_id(true);
+            $_SESSION['user'] = ['id' => $id, 'nome' => $old['nome'], 'email' => $old['email'], 'cargo' => '', 'perfil' => 'CLIENTE'];
+            flash('ok', 'Cadastro realizado com sucesso! Bem-vindo(a).');
+            redirecionar('cliente/dashboard.php');
+        } catch (mysqli_sql_exception $ex) {
+            $erroCad = erro_db($ex);
+        }
+    }
+}
+?>
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -332,162 +407,119 @@
   <div class="auth-box">
 
     <div class="tabs">
-      <button class="tab-btn active" onclick="showTab('login')">Entrar</button>
-      <button class="tab-btn" onclick="showTab('register')">Criar conta</button>
+      <button type="button" class="tab-btn<?= $aba === 'login' ? ' active' : '' ?>" onclick="showTab('login')">Entrar</button>
+      <button type="button" class="tab-btn<?= $aba === 'register' ? ' active' : '' ?>" onclick="showTab('register')">Criar conta</button>
     </div>
 
     <!-- LOGIN PANEL -->
-    <div class="form-panel active" id="panel-login">
+    <form method="POST" class="form-panel<?= $aba === 'login' ? ' active' : '' ?>" id="panel-login">
+      <?= csrf_field() ?>
+      <input type="hidden" name="_action" value="login"/>
       <div class="form-head">
         <div class="form-title">Bom retorno</div>
         <div class="form-sub">Acesse com seu e-mail e senha cadastrados.</div>
       </div>
 
-      <div id="login-alert" class="alert error" style="display:none;">E-mail ou senha incorretos. Tente novamente.</div>
+      <?php if ($erroLogin): ?><div class="alert error"><?= e($erroLogin) ?></div><?php endif; ?>
 
       <div class="field">
         <label>E-mail</label>
-        <input type="email" id="login-email" placeholder="seu@email.com"/>
+        <input type="email" name="email" value="<?= e($old['login_email'] ?? '') ?>" placeholder="seu@email.com" required autofocus/>
       </div>
       <div class="field">
         <label>Senha</label>
-        <input type="password" id="login-pass" placeholder="••••••••"/>
+        <input type="password" name="senha" placeholder="••••••••" required/>
       </div>
-      <a href="#" class="forgot-link">Esqueceu a senha?</a>
-      <button class="btn-primary" onclick="handleLogin()">Entrar no sistema</button>
+      <a href="#" class="forgot-link" onclick="alert('Para redefinir sua senha, entre em contato com a oficina.'); return false;">Esqueceu a senha?</a>
+      <button type="submit" class="btn-primary">Entrar no sistema</button>
 
       <div class="form-footer">
-        Não tem conta? <a href="#" onclick="showTab('register')">Cadastre-se</a>
+        Não tem conta? <a href="#" onclick="showTab('register'); return false;">Cadastre-se</a>
       </div>
-    </div>
+    </form>
 
     <!-- REGISTER PANEL -->
-    <div class="form-panel" id="panel-register">
+    <form method="POST" class="form-panel<?= $aba === 'register' ? ' active' : '' ?>" id="panel-register">
+      <?= csrf_field() ?>
+      <input type="hidden" name="_action" value="cadastro"/>
       <div class="form-head">
         <div class="form-title">Criar conta</div>
         <div class="form-sub">Preencha seus dados para se cadastrar como cliente.</div>
       </div>
 
-      <div id="reg-alert" class="alert" style="display:none;"></div>
+      <?php if ($erroCad): ?><div class="alert error"><?= e($erroCad) ?></div><?php endif; ?>
 
       <div class="field-row">
         <div class="field">
           <label>Nome completo</label>
-          <input type="text" id="reg-nome" placeholder="João Silva"/>
+          <input type="text" name="nome" value="<?= e($old['nome'] ?? '') ?>" placeholder="João Silva" required/>
         </div>
         <div class="field">
           <label>CPF</label>
-          <input type="text" id="reg-cpf" placeholder="000.000.000-00" maxlength="14"/>
+          <input type="text" name="cpf" id="reg-cpf" value="<?= e($old['cpf'] ?? '') ?>" placeholder="000.000.000-00" maxlength="14" required/>
         </div>
       </div>
 
       <div class="field">
         <label>E-mail</label>
-        <input type="email" id="reg-email" placeholder="seu@email.com"/>
+        <input type="email" name="email" value="<?= e($old['email'] ?? '') ?>" placeholder="seu@email.com" required/>
       </div>
 
       <div class="field">
         <label>Telefone</label>
-        <input type="tel" id="reg-tel" placeholder="(00) 00000-0000"/>
+        <input type="tel" name="telefone" id="reg-tel" value="<?= e($old['telefone'] ?? '') ?>" placeholder="(00) 00000-0000" maxlength="15" required/>
       </div>
 
       <div class="field">
         <label>Endereço</label>
-        <input type="text" id="reg-end" placeholder="Rua, número, bairro, cidade"/>
+        <input type="text" name="endereco" value="<?= e($old['endereco'] ?? '') ?>" placeholder="Rua, número, bairro, cidade" maxlength="100" required/>
       </div>
 
       <div class="field-row">
         <div class="field">
           <label>Senha</label>
-          <input type="password" id="reg-pass" placeholder="Mín. 8 caracteres"/>
+          <input type="password" name="senha" placeholder="Mín. 8 caracteres" minlength="8" required/>
         </div>
         <div class="field">
           <label>Confirmar senha</label>
-          <input type="password" id="reg-pass2" placeholder="Repita a senha"/>
+          <input type="password" name="senha2" placeholder="Repita a senha" minlength="8" required/>
         </div>
       </div>
 
-      <button class="btn-primary" onclick="handleRegister()">Criar conta</button>
+      <button type="submit" class="btn-primary">Criar conta</button>
 
       <div class="form-footer">
-        Já tem conta? <a href="#" onclick="showTab('login')">Faça login</a>
+        Já tem conta? <a href="#" onclick="showTab('login'); return false;">Faça login</a>
       </div>
-    </div>
+    </form>
 
   </div>
 </div>
 
 <script>
   function showTab(tab) {
-    document.querySelectorAll('.tab-btn').forEach((b,i) => {
-      b.classList.toggle('active', (tab === 'login' ? i===0 : i===1));
+    document.querySelectorAll('.tab-btn').forEach((b, i) => {
+      b.classList.toggle('active', (tab === 'login' ? i === 0 : i === 1));
     });
     document.querySelectorAll('.form-panel').forEach(p => p.classList.remove('active'));
     document.getElementById('panel-' + tab).classList.add('active');
   }
 
-  function handleLogin() {
-    const email = document.getElementById('login-email').value.trim();
-    const pass  = document.getElementById('login-pass').value;
-    const alert = document.getElementById('login-alert');
-    if (!email || !pass) {
-      alert.style.display = 'block';
-      alert.textContent = 'Preencha todos os campos.';
-      return;
-    }
-    // Simulated redirect logic
-    if (email.includes('admin')) {
-      window.location.href = 'imm-dashboard.html';
-    } else if (email.includes('colab')) {
-      window.location.href = 'imm-dashboard-colaborador.html';
-    } else {
-      window.location.href = 'imm-dashboard-cliente.html';
-    }
-  }
-
-  function handleRegister() {
-    const nome  = document.getElementById('reg-nome').value.trim();
-    const cpf   = document.getElementById('reg-cpf').value.trim();
-    const email = document.getElementById('reg-email').value.trim();
-    const tel   = document.getElementById('reg-tel').value.trim();
-    const end   = document.getElementById('reg-end').value.trim();
-    const pass  = document.getElementById('reg-pass').value;
-    const pass2 = document.getElementById('reg-pass2').value;
-    const alert = document.getElementById('reg-alert');
-
-    alert.className = 'alert';
-    alert.style.display = 'none';
-
-    if (!nome || !cpf || !email || !tel || !end || !pass || !pass2) {
-      alert.className = 'alert error';
-      alert.style.display = 'block';
-      alert.textContent = 'Preencha todos os campos obrigatórios.';
-      return;
-    }
-    if (pass !== pass2) {
-      alert.className = 'alert error';
-      alert.style.display = 'block';
-      alert.textContent = 'As senhas não conferem.';
-      return;
-    }
-    if (pass.length < 8) {
-      alert.className = 'alert error';
-      alert.style.display = 'block';
-      alert.textContent = 'A senha deve ter ao menos 8 caracteres.';
-      return;
-    }
-    alert.className = 'alert success';
-    alert.style.display = 'block';
-    alert.textContent = 'Cadastro realizado com sucesso! Redirecionando...';
-    setTimeout(() => { window.location.href = 'imm-dashboard-cliente.html'; }, 1500);
-  }
-
   // CPF mask
   document.getElementById('reg-cpf').addEventListener('input', function() {
-    let v = this.value.replace(/\D/g,'');
+    let v = this.value.replace(/\D/g,'').substring(0, 11);
     v = v.replace(/(\d{3})(\d)/,'$1.$2');
     v = v.replace(/(\d{3})(\d)/,'$1.$2');
     v = v.replace(/(\d{3})(\d{1,2})$/,'$1-$2');
+    this.value = v;
+  });
+
+  // Telefone mask
+  document.getElementById('reg-tel').addEventListener('input', function() {
+    let v = this.value.replace(/\D/g,'').substring(0, 11);
+    if (v.length > 10)     v = v.replace(/(\d{2})(\d{5})(\d{4})/, '($1) $2-$3');
+    else if (v.length > 6) v = v.replace(/(\d{2})(\d{4})(\d+)/, '($1) $2-$3');
+    else if (v.length > 2) v = v.replace(/(\d{2})(\d+)/, '($1) $2');
     this.value = v;
   });
 </script>
