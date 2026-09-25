@@ -37,7 +37,7 @@ CREATE TABLE `cliente` (
   `email` varchar(100) NOT NULL,
   `senha` varchar(100) NOT NULL,
   `telefone` varchar(15) DEFAULT NULL,
-  `endereco` varchar(100) NOT NULL
+  `endereco` varchar(200) NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 --
