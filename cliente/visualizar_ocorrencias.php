@@ -6,194 +6,207 @@ $veiculos = db_all('SELECT v.id, v.placa, mo.nome AS modelo, ma.nome AS marca
                     FROM veiculo v JOIN modelo mo ON mo.id = v.idModelo JOIN marca ma ON ma.id = mo.idMarca
                     WHERE v.idCliente = ? ORDER BY v.placa', [$u['id']]);
 
+// Protocolo pedido na URL (ex.: vindo de uma notificação) define o veículo selecionado.
+$numeroFoco = (int)($_GET['numero'] ?? 0);
+$idVeiculoFoco = $numeroFoco ? db_val('SELECT p.idVeiculo FROM protocolo p JOIN veiculo v ON v.id = p.idVeiculo
+                                       WHERE p.numero = ? AND v.idCliente = ?', [$numeroFoco, $u['id']]) : null;
+
 $sel = $veiculos[0] ?? null;
-foreach ($veiculos as $v) if ($v['id'] === ($_GET['v'] ?? '')) $sel = $v;
+foreach ($veiculos as $v) if ($v['id'] === ($idVeiculoFoco ?? $_GET['v'] ?? '')) $sel = $v;
 
 // Ocorrências (com protocolo) do veículo selecionado, mais recentes primeiro.
-$ocorrencias = $sel ? db_all("SELECT p.numero, p.status, o.id AS idOcorrencia, o.descricao, o.componentes, o.dataRegistro,
+$ocorrencias = $sel ? db_all("SELECT p.numero, p.status, p.kmEntrada, p.previsaoEntrega, p.dataFinalizacao,
+                                     o.id AS idOcorrencia, o.descricao, o.componentes, o.dataRegistro,
                                      col.nome AS colaborador, col.cargo
                               FROM protocolo p
                               JOIN ocorrencia o    ON o.id = p.idOcorrencia
                               JOIN colaborador col ON col.id = p.responsavel
                               WHERE p.idVeiculo = ? ORDER BY p.numero DESC", [$sel['id']]) : [];
 
-// Itens de todas as ocorrências listadas, agrupados por ocorrência.
-$itens = [];
+// Itens, fotos e etapas de todas as ocorrências listadas, agrupados por protocolo.
+$itens = $fotos = $etapas = [];
 if ($ocorrencias) {
-    $ids = array_column($ocorrencias, 'idOcorrencia');
-    $rows = db_all('SELECT idOcorrencia, descricao FROM itemocorrencia
-                    WHERE idOcorrencia IN (' . implode(',', array_fill(0, count($ids), '?')) . ')
-                    ORDER BY dataHora, id', $ids);
-    foreach ($rows as $r) $itens[$r['idOcorrencia']][] = $r['descricao'];
+    $ids  = array_column($ocorrencias, 'idOcorrencia');
+    $nums = array_map('intval', array_column($ocorrencias, 'numero'));
+    $marc = fn($n) => implode(',', array_fill(0, $n, '?'));
+    foreach (db_all('SELECT idOcorrencia, descricao FROM itemocorrencia WHERE idOcorrencia IN (' . $marc(count($ids)) . ')
+                     ORDER BY dataHora, id', $ids) as $r) $itens[$r['idOcorrencia']][] = $r['descricao'];
+    foreach (db_all('SELECT numeroProtocolo, arquivo, legenda FROM foto WHERE numeroProtocolo IN (' . $marc(count($nums)) . ')
+                     ORDER BY dataHora, id', $nums) as $r) $fotos[$r['numeroProtocolo']][] = $r;
+    foreach (db_all('SELECT s.numeroProtocolo, s.status, s.dataHora, NULL AS colaborador FROM protocolo_status s
+                     WHERE s.numeroProtocolo IN (' . $marc(count($nums)) . ') ORDER BY s.dataHora, s.id', $nums) as $r) $etapas[$r['numeroProtocolo']][] = $r;
+}
+$expandido = $numeroFoco ?: (int)($ocorrencias[0]['numero'] ?? 0);
+
+// Etapas resumidas exibidas no "rastreio" e a posição de cada status nelas.
+const ETAPAS_RASTREIO = ['Recebido', 'Em serviço', 'Pronto', 'Entregue'];
+function posicao_rastreio(string $status): int {
+    return match ($status) {
+        'ABERTO'     => 0,
+        'PRONTO'     => 2,
+        'FINALIZADO' => 3,
+        default      => 1,   // em atendimento ou aguardando peças/aprovação
+    };
 }
 ?>
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>IMM – Ocorrências</title>
-  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+  <?php head_comum('Ocorrências'); ?>
   <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    :root {
-      --bg: #F5F4F2; --surface: #FFFFFF; --border: #E4E2DE;
-      --text: #1A1917; --muted: #7A7872; --sidebar-w: 230px;
-      --tag-open: #E8F2EC; --tag-open-t: #2D7A4F;
-      --tag-prog: #FEF4E4; --tag-prog-t: #A05A00;
-      --tag-done: #EDECEA; --tag-done-t: #5A5750;
-    }
-    body { font-family: 'DM Sans', sans-serif; background: var(--bg); color: var(--text); display: flex; min-height: 100vh; }
-    aside { width: var(--sidebar-w); min-height: 100vh; background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; padding: 28px 0; position: fixed; top: 0; left: 0; }
-    .logo { padding: 0 24px 28px; border-bottom: 1px solid var(--border); }
-    .logo-mark { font-family: 'DM Mono', monospace; font-size: 13px; font-weight: 500; letter-spacing: 0.08em; color: var(--muted); text-transform: uppercase; margin-bottom: 4px; }
-    .logo-name { font-size: 15px; font-weight: 600; line-height: 1.3; }
-    nav { flex: 1; padding: 20px 12px; display: flex; flex-direction: column; gap: 2px; }
-    .nav-label { font-size: 10px; font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); padding: 14px 12px 6px; }
-    .nav-item { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 8px; font-size: 14px; color: var(--muted); cursor: pointer; text-decoration: none; transition: background 0.15s, color 0.15s; }
-    .nav-item:hover { background: var(--bg); color: var(--text); }
-    .nav-item.active { background: var(--text); color: #fff; }
-    .nav-item .icon { width: 18px; height: 18px; opacity: 0.7; flex-shrink: 0; }
-    .nav-item.active .icon { opacity: 1; }
-    .sidebar-footer { padding: 20px 24px 0; border-top: 1px solid var(--border); }
-    .user-chip { display: flex; align-items: center; gap: 10px; }
-    .avatar { width: 32px; height: 32px; border-radius: 50%; background: var(--text); color: #fff; font-size: 12px; font-weight: 600; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
-    .user-name { font-size: 13px; font-weight: 500; }
-    .user-role { font-size: 11px; color: var(--muted); font-family: 'DM Mono', monospace; }
-    main { margin-left: var(--sidebar-w); flex: 1; padding: 40px 48px; }
-    .topbar { display: flex; align-items: center; justify-content: flex-end; gap: 12px; margin-bottom: 32px; }
-    .notif-btn { width: 36px; height: 36px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); display: flex; align-items: center; justify-content: center; cursor: pointer; position: relative; }
-    .notif-dot { width: 7px; height: 7px; background: #C0392B; border-radius: 50%; position: absolute; top: 7px; right: 7px; border: 1.5px solid white; }
-    .page-header { display: flex; align-items: flex-end; justify-content: space-between; margin-bottom: 28px; }
-    .page-title { font-size: 22px; font-weight: 600; letter-spacing: -0.02em; }
-    .page-sub { font-size: 13px; color: var(--muted); margin-top: 4px; }
-
-    /* VEHICLE TABS */
-    .vehicle-tabs {
-      display: flex; gap: 8px; margin-bottom: 28px;
-      border-bottom: 1px solid var(--border); padding-bottom: 0;
-    }
-    .vtab {
-      padding: 10px 18px; font-size: 13.5px; font-weight: 500;
-      color: var(--muted); border: none; background: none;
-      font-family: inherit; cursor: pointer; border-bottom: 2px solid transparent;
-      margin-bottom: -1px; transition: color 0.15s;
-    }
-    .vtab.active { color: var(--text); border-bottom-color: var(--text); }
-    .vtab:hover { color: var(--text); }
-
-    /* OCCURRENCE CARD */
     .occurrence-list { display: flex; flex-direction: column; gap: 14px; }
-    .occ-card {
-      background: var(--surface); border: 1px solid var(--border);
-      border-radius: 12px; overflow: hidden;
-    }
-    .occ-header {
-      display: flex; align-items: center; justify-content: space-between;
-      padding: 16px 22px; border-bottom: 1px solid var(--border);
-      cursor: pointer; user-select: none;
-    }
-    .occ-header:hover { background: #fafaf9; }
-    .occ-meta { display: flex; align-items: center; gap: 14px; }
+    .occ-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+    .occ-card.expanded { border-color: var(--border-strong); }
+    .occ-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 22px; cursor: pointer; user-select: none; width: 100%; background: none; border: none; text-align: left; }
+    .occ-header:hover { background: var(--surface-2); }
+    .occ-meta { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; min-width: 0; }
     .occ-id { font-family: 'DM Mono', monospace; font-size: 12px; color: var(--muted); }
     .occ-date { font-size: 13px; color: var(--muted); }
-    .badge { display: inline-flex; align-items: center; font-size: 11.5px; font-weight: 500; padding: 3px 9px; border-radius: 20px; }
-    .badge.open  { background: var(--tag-open);  color: var(--tag-open-t); }
-    .badge.prog  { background: var(--tag-prog);  color: var(--tag-prog-t); }
-    .badge.done  { background: var(--tag-done);  color: var(--tag-done-t); }
-    .occ-right { display: flex; align-items: center; gap: 12px; }
+    .occ-right { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
     .occ-toggle { color: var(--muted); transition: transform 0.2s; }
     .occ-card.expanded .occ-toggle { transform: rotate(180deg); }
-
-    .occ-body { display: none; padding: 20px 22px; }
+    .occ-body { display: none; border-top: 1px solid var(--border); }
     .occ-card.expanded .occ-body { display: block; }
-
-    .occ-section-label { font-size: 11px; font-weight: 500; color: var(--muted); text-transform: uppercase; letter-spacing: 0.07em; margin-bottom: 10px; }
-    .occ-collab { font-size: 13px; margin-bottom: 20px; }
-    .occ-collab strong { font-weight: 600; }
-
-    .item-list { display: flex; flex-direction: column; gap: 10px; }
-    .item-row {
-      display: flex; align-items: flex-start; gap: 12px;
-      padding: 12px 16px; background: var(--bg);
-      border-radius: 9px; border: 1px solid var(--border);
+    .occ-content { display: grid; grid-template-columns: minmax(0, 1fr) 280px; }
+    .occ-main { padding: 20px 22px; display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+    .occ-side { border-left: 1px solid var(--border); }
+    .occ-side .section-label { padding: 18px 22px 0; margin-bottom: 0; }
+    .occ-summary { font-size: 13px; color: var(--muted); line-height: 1.5; }
+    .waiting-note { margin: 4px 22px 0; }
+    .facts { display: flex; gap: 24px; flex-wrap: wrap; font-size: 13px; }
+    .facts .info-label { margin-bottom: 2px; }
+    @media (max-width: 900px) {
+      .occ-content { grid-template-columns: 1fr; }
+      .occ-side { border-left: none; border-top: 1px solid var(--border); }
     }
-    .item-num {
-      font-family: 'DM Mono', monospace; font-size: 11px;
-      color: var(--muted); padding-top: 1px; flex-shrink: 0;
+    @media (max-width: 760px) {
+      .occ-header { padding: 14px 16px; }
+      .occ-main { padding: 16px; }
+      .occ-side .section-label { padding: 16px 16px 0; }
+      .progress-track { padding-left: 8px; padding-right: 8px; }
+      .waiting-note { margin: 4px 16px 0; }
     }
-    .item-desc { font-size: 13.5px; line-height: 1.5; }
-
-    .empty-state { text-align: center; padding: 60px 20px; color: var(--muted); }
-    .empty-icon { font-size: 32px; margin-bottom: 12px; }
-    .empty-title { font-size: 15px; font-weight: 600; color: var(--text); margin-bottom: 6px; }
-    .empty-sub { font-size: 13px; }
   </style>
 </head>
 <body>
-<style>
-  a.vtab { text-decoration: none; }
-  .occ-summary { font-size: 13px; color: var(--muted); line-height: 1.5; margin-bottom: 18px; }
-</style>
-
 <?php sidebar('ocorrencias'); ?>
 
 <main>
   <div class="page-header">
     <div>
       <div class="page-title">Ocorrências</div>
-      <div class="page-sub">Acompanhe os problemas registrados nos seus veículos.</div>
+      <div class="page-sub">Acompanhe o andamento dos serviços nos seus veículos.</div>
     </div>
   </div>
 
   <?php if (!$veiculos): ?>
-    <div class="empty-state">
+    <div class="empty-state lg">
       <div class="empty-icon">🚗</div>
       <div class="empty-title">Nenhum veículo cadastrado</div>
-      <div class="empty-sub"><a href="meus_veiculos.php?novo=1" style="color:var(--text)">Cadastre um veículo</a> para acompanhar as ocorrências.</div>
+      <a href="meus_veiculos.php?novo=1">Cadastre um veículo</a> para acompanhar as ocorrências.
     </div>
   <?php else: ?>
 
-  <!-- VEHICLE TABS -->
   <div class="vehicle-tabs">
     <?php foreach ($veiculos as $v): ?>
-      <a class="vtab<?= $v['id'] === $sel['id'] ? ' active' : '' ?>" href="?v=<?= urlencode($v['id']) ?>"><?= e($v['placa']) ?> — <?= e($v['modelo']) ?></a>
+      <a class="vtab<?= $v['id'] === $sel['id'] ? ' active' : '' ?>" href="?v=<?= urlencode($v['id']) ?>">
+        <span class="vtab-plate"><?= e($v['placa']) ?></span>
+        <span class="vtab-model"><?= e($v['marca'] . ' ' . $v['modelo']) ?></span>
+      </a>
     <?php endforeach; ?>
   </div>
 
   <?php if (!$ocorrencias): ?>
-    <div class="empty-state">
+    <div class="empty-state lg">
       <div class="empty-icon">📋</div>
       <div class="empty-title">Nenhuma ocorrência registrada</div>
-      <div class="empty-sub">Seu <?= e($sel['marca'] . ' ' . $sel['modelo']) ?> (<?= e($sel['placa']) ?>) não possui ocorrências.</div>
+      Seu <?= e($sel['marca'] . ' ' . $sel['modelo']) ?> (<?= e($sel['placa']) ?>) não possui ocorrências.
     </div>
   <?php else: ?>
   <div class="occurrence-list">
-    <?php foreach ($ocorrencias as $i => $o): ?>
-    <div class="occ-card<?= $i === 0 ? ' expanded' : '' ?>">
-      <div class="occ-header" onclick="this.parentElement.classList.toggle('expanded')">
-        <div class="occ-meta">
-          <span class="occ-id"><?= proto_num($o['numero']) ?></span>
+    <?php foreach ($ocorrencias as $o):
+      $num = (int)$o['numero'];
+      $cancelado = $o['status'] === 'CANCELADO';
+      $pos = $cancelado ? -1 : posicao_rastreio($o['status']);
+      $late = atrasado($o['previsaoEntrega'], $o['status']);
+    ?>
+    <div class="occ-card<?= $num === $expandido ? ' expanded' : '' ?>" id="p<?= $num ?>">
+      <button type="button" class="occ-header" onclick="this.parentElement.classList.toggle('expanded')" aria-expanded="<?= $num === $expandido ? 'true' : 'false' ?>">
+        <span class="occ-meta">
+          <span class="occ-id"><?= proto_num($num) ?></span>
           <span class="occ-date"><?= fmt_data_curta($o['dataRegistro']) ?><?= $o['componentes'] ? ' · ' . e($o['componentes']) : '' ?></span>
-        </div>
-        <div class="occ-right">
+        </span>
+        <span class="occ-right">
           <?= badge(status_protocolo($o['status'])) ?>
           <svg class="occ-toggle" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
-        </div>
-      </div>
+        </span>
+      </button>
+
       <div class="occ-body">
-        <div class="occ-section-label">Responsável</div>
-        <div class="occ-collab" style="margin-bottom:18px;"><strong><?= e($o['colaborador']) ?></strong> · <?= e($o['cargo']) ?></div>
-        <div class="occ-section-label">Resumo</div>
-        <div class="occ-summary"><?= e($o['descricao']) ?></div>
-        <div class="occ-section-label">Itens da ocorrência</div>
-        <div class="item-list">
-          <?php foreach ($itens[$o['idOcorrencia']] ?? [] as $n => $desc): ?>
-          <div class="item-row">
-            <span class="item-num"><?= str_pad((string)($n + 1), 2, '0', STR_PAD_LEFT) ?></span>
-            <span class="item-desc"><?= e($desc) ?></span>
+        <?php if (!$cancelado): ?>
+          <div class="progress-track" aria-label="Andamento do serviço">
+            <?php foreach (ETAPAS_RASTREIO as $i => $rotulo): $cls = $i < $pos || ($i === $pos && $pos === 3) ? 'done' : ($i === $pos ? 'current' : ''); ?>
+              <div class="track-step <?= $cls ?>">
+                <div class="track-dot"><?= $cls === 'done' ? '✓' : '' ?></div>
+                <?= e($i === 1 && in_array($o['status'], ['AGUARDANDO_PECAS', 'AGUARDANDO_APROVACAO'], true) ? status_protocolo($o['status'])[1] : $rotulo) ?>
+              </div>
+            <?php endforeach; ?>
           </div>
-          <?php endforeach; ?>
+          <?php if ($o['status'] === 'AGUARDANDO_APROVACAO'): ?>
+            <div class="notice info waiting-note">A oficina aguarda a sua autorização para continuar o serviço. Entre em contato para aprovar.</div>
+          <?php elseif ($o['status'] === 'PRONTO'): ?>
+            <div class="notice waiting-note" style="background:var(--tag-ready);color:var(--tag-ready-t);border-color:var(--tag-ready-t)">Seu veículo está pronto! Você já pode retirá-lo na oficina.</div>
+          <?php endif; ?>
+        <?php else: ?>
+          <div class="notice err waiting-note" style="margin-top:18px">Este atendimento foi cancelado em <?= fmt_data($o['dataFinalizacao']) ?>.</div>
+        <?php endif; ?>
+
+        <div class="occ-content">
+          <div class="occ-main">
+            <div class="facts">
+              <div><div class="info-label">Responsável</div><strong><?= e($o['colaborador']) ?></strong> · <?= e($o['cargo']) ?></div>
+              <?php if ($o['kmEntrada']): ?><div><div class="info-label">KM de entrada</div><?= fmt_km($o['kmEntrada']) ?></div><?php endif; ?>
+              <?php if ($o['previsaoEntrega'] && in_array($o['status'], STATUS_ATIVOS, true)): ?>
+                <div><div class="info-label">Previsão de entrega</div><span<?= $late ? ' class="text-danger"' : '' ?>><?= fmt_data($o['previsaoEntrega']) ?><?= $late ? ' (atrasado)' : '' ?></span></div>
+              <?php endif; ?>
+            </div>
+
+            <div>
+              <div class="section-label">Resumo</div>
+              <div class="occ-summary"><?= e($o['descricao']) ?></div>
+            </div>
+
+            <div>
+              <div class="section-label">Itens da ocorrência</div>
+              <div class="item-list">
+                <?php foreach ($itens[$o['idOcorrencia']] ?? [] as $n => $desc): ?>
+                <div class="item-view">
+                  <span class="item-num"><?= str_pad((string)($n + 1), 2, '0', STR_PAD_LEFT) ?></span>
+                  <span class="item-desc"><?= e($desc) ?></span>
+                </div>
+                <?php endforeach; ?>
+              </div>
+            </div>
+
+            <?php if (!empty($fotos[$num])): ?>
+            <div>
+              <div class="section-label">Fotos do atendimento</div>
+              <div class="photo-grid">
+                <?php foreach ($fotos[$num] as $f): $src = '../' . PASTA_FOTOS . $f['arquivo']; ?>
+                  <div class="photo">
+                    <a href="<?= e($src) ?>" data-lightbox data-caption="<?= e($f['legenda'] ?? '') ?>"><img src="<?= e($src) ?>" alt="<?= e($f['legenda'] ?: 'Foto do atendimento') ?>" loading="lazy"/></a>
+                    <?php if ($f['legenda']): ?><div class="photo-caption"><?= e($f['legenda']) ?></div><?php endif; ?>
+                  </div>
+                <?php endforeach; ?>
+              </div>
+            </div>
+            <?php endif; ?>
+          </div>
+
+          <div class="occ-side">
+            <div class="section-label">Linha do tempo</div>
+            <?php linha_do_tempo($etapas[$num] ?? [], $o['previsaoEntrega']); ?>
+          </div>
         </div>
       </div>
     </div>
@@ -201,9 +214,11 @@ if ($ocorrencias) {
   </div>
   <?php endif; ?>
   <?php endif; ?>
-
 </main>
 
 <?php flash_html(); ?>
+<?php if ($numeroFoco): ?>
+<script>document.addEventListener('DOMContentLoaded', () => document.getElementById('p<?= $numeroFoco ?>')?.scrollIntoView({ block: 'start' }));</script>
+<?php endif; ?>
 </body>
 </html>

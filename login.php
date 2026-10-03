@@ -141,6 +141,8 @@ if (acao() === 'cadastro') {
                 $id, $old['nome'], $cpf, $old['email'], password_hash($senha, PASSWORD_DEFAULT),
                 so_digitos($old['telefone']), $endereco,
             ]);
+            notificar_admins('Novo cliente cadastrado', $old['nome'] . ' criou uma conta pelo site.',
+                             'colaborador/visualizar_clientes.php?q=' . urlencode($old['nome']));
             session_regenerate_id(true);
             $_SESSION['user'] = ['id' => $id, 'nome' => $old['nome'], 'email' => $old['email'], 'cargo' => '', 'perfil' => 'CLIENTE'];
             flash('ok', 'Cadastro realizado com sucesso! Bem-vindo(a).');
@@ -162,6 +164,7 @@ if (acao() === 'cadastro') {
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>IMM – Login</title>
+  <script>try { const t = localStorage.getItem("imm-tema"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}</script>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -173,7 +176,26 @@ if (acao() === 'cadastro') {
       --text:    #1A1917;
       --muted:   #7A7872;
       --accent:  #1A1917;
+      --on-accent: #FFFFFF;
       --error:   #C0392B;
+      --err-bg: #FEF0EE; --err-t: #9B2C2C; --err-b: #FBC8C3;
+      --ok-bg: #E8F2EC;  --ok-t: #2D7A4F;  --ok-b: #B7DEC8;
+      color-scheme: light;
+    }
+    /* Modo escuro (mesmo esquema das páginas internas: sistema ou escolha salva). */
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) {
+        --bg: #141413; --surface: #1E1D1B; --border: #33312E; --text: #EDEBE7; --muted: #9C9991;
+        --accent: #EDEBE7; --on-accent: #1A1917; --error: #EC7063;
+        --err-bg: #3B1C18; --err-t: #F2958B; --err-b: #6B2E27; --ok-bg: #173323; --ok-t: #74D39C; --ok-b: #2A5A3E;
+        color-scheme: dark;
+      }
+    }
+    :root[data-theme="dark"] {
+      --bg: #141413; --surface: #1E1D1B; --border: #33312E; --text: #EDEBE7; --muted: #9C9991;
+      --accent: #EDEBE7; --on-accent: #1A1917; --error: #EC7063;
+      --err-bg: #3B1C18; --err-t: #F2958B; --err-b: #6B2E27; --ok-bg: #173323; --ok-t: #74D39C; --ok-b: #2A5A3E;
+      color-scheme: dark;
     }
 
     body {
@@ -189,7 +211,7 @@ if (acao() === 'cadastro') {
     .left-panel {
       width: 420px;
       flex-shrink: 0;
-      background: var(--text);
+      background: #1A1917;
       color: #fff;
       display: flex;
       flex-direction: column;
@@ -443,9 +465,9 @@ if (acao() === 'cadastro') {
 
     .btn-secondary {
       padding: 10px 18px;
-      background: var(--text);
-      color: #fff;
-      border: 1px solid var(--text);
+      background: var(--accent);
+      color: var(--on-accent);
+      border: 1px solid var(--accent);
       border-radius: 8px;
       font-family: inherit;
       font-size: 12.5px;
@@ -471,8 +493,8 @@ if (acao() === 'cadastro') {
     .btn-primary {
       width: 100%;
       padding: 11px 20px;
-      background: var(--text);
-      color: #fff;
+      background: var(--accent);
+      color: var(--on-accent);
       border: none;
       border-radius: 8px;
       font-family: inherit;
@@ -516,7 +538,7 @@ if (acao() === 'cadastro') {
     }
     .role-card.selected {
       border-color: var(--text);
-      background: #f9f9f8;
+      background: var(--bg);
     }
     .role-card input[type="radio"] { display: none; }
     .role-icon { font-size: 20px; margin-bottom: 6px; }
@@ -543,8 +565,8 @@ if (acao() === 'cadastro') {
       margin-bottom: 20px;
       display: none;
     }
-    .alert.error { background: #FEF0EE; color: #9B2C2C; border: 1px solid #FBC8C3; display: block; }
-    .alert.success { background: #E8F2EC; color: #2D7A4F; border: 1px solid #B7DEC8; display: block; }
+    .alert.error { background: var(--err-bg); color: var(--err-t); border: 1px solid var(--err-b); display: block; }
+    .alert.success { background: var(--ok-bg); color: var(--ok-t); border: 1px solid var(--ok-b); display: block; }
 
     @media (max-width: 768px) {
       .left-panel { display: none; }

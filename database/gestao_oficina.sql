@@ -149,7 +149,9 @@ CREATE TABLE `ocorrencia` (
 CREATE TABLE `protocolo` (
   `numero` int(11) NOT NULL,
   `dataFinalizacao` date DEFAULT NULL,
-  `status` enum('ABERTO','EM_ATENDIMENTO','FINALIZADO','CANCELADO') NOT NULL,
+  `status` enum('ABERTO','AGUARDANDO_APROVACAO','EM_ATENDIMENTO','AGUARDANDO_PECAS','PRONTO','FINALIZADO','CANCELADO') NOT NULL,
+  `kmEntrada` int(11) DEFAULT NULL,
+  `previsaoEntrega` date DEFAULT NULL,
   `responsavel` char(36) NOT NULL,
   `idOcorrencia` char(36) NOT NULL,
   `idVeiculo` char(36) NOT NULL
@@ -288,6 +290,70 @@ ALTER TABLE `protocolo`
 ALTER TABLE `veiculo`
   ADD CONSTRAINT `veiculo_ibfk_1` FOREIGN KEY (`idModelo`) REFERENCES `modelo` (`id`),
   ADD CONSTRAINT `veiculo_ibfk_2` FOREIGN KEY (`idCliente`) REFERENCES `cliente` (`id`) ON DELETE CASCADE;
+
+-- --------------------------------------------------------
+
+--
+-- Linha do tempo de status de cada protocolo
+--
+CREATE TABLE `protocolo_status` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `numeroProtocolo` int(11) NOT NULL,
+  `status` enum('ABERTO','AGUARDANDO_APROVACAO','EM_ATENDIMENTO','AGUARDANDO_PECAS','PRONTO','FINALIZADO','CANCELADO') NOT NULL,
+  `dataHora` timestamp NOT NULL DEFAULT current_timestamp(),
+  `idColaborador` char(36) DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_status_protocolo` (`numeroProtocolo`),
+  CONSTRAINT `protocolo_status_ibfk_1` FOREIGN KEY (`numeroProtocolo`) REFERENCES `protocolo` (`numero`) ON DELETE CASCADE,
+  CONSTRAINT `protocolo_status_ibfk_2` FOREIGN KEY (`idColaborador`) REFERENCES `colaborador` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+-- Avaliação do atendimento pelo cliente (1 por protocolo)
+--
+CREATE TABLE `avaliacao` (
+  `numeroProtocolo` int(11) NOT NULL,
+  `nota` tinyint(4) NOT NULL,
+  `comentario` varchar(500) DEFAULT NULL,
+  `dataHora` timestamp NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`numeroProtocolo`),
+  CONSTRAINT `avaliacao_ibfk_1` FOREIGN KEY (`numeroProtocolo`) REFERENCES `protocolo` (`numero`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+-- Fotos anexadas ao atendimento (arquivos em uploads/fotos/)
+--
+CREATE TABLE `foto` (
+  `id` char(36) NOT NULL,
+  `numeroProtocolo` int(11) NOT NULL,
+  `arquivo` varchar(100) NOT NULL,
+  `legenda` varchar(150) DEFAULT NULL,
+  `dataHora` timestamp NOT NULL DEFAULT current_timestamp(),
+  `idColaborador` char(36) DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_foto_protocolo` (`numeroProtocolo`),
+  CONSTRAINT `foto_ibfk_1` FOREIGN KEY (`numeroProtocolo`) REFERENCES `protocolo` (`numero`) ON DELETE CASCADE,
+  CONSTRAINT `foto_ibfk_2` FOREIGN KEY (`idColaborador`) REFERENCES `colaborador` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+-- Notificações (destinatário: um cliente OU um colaborador)
+--
+CREATE TABLE `notificacao` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `idCliente` char(36) DEFAULT NULL,
+  `idColaborador` char(36) DEFAULT NULL,
+  `titulo` varchar(100) NOT NULL,
+  `mensagem` varchar(255) NOT NULL,
+  `link` varchar(255) DEFAULT NULL,
+  `lida` tinyint(1) NOT NULL DEFAULT 0,
+  `dataHora` timestamp NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`),
+  KEY `idx_notif_cliente` (`idCliente`, `lida`),
+  KEY `idx_notif_colaborador` (`idColaborador`, `lida`),
+  CONSTRAINT `notificacao_ibfk_1` FOREIGN KEY (`idCliente`) REFERENCES `cliente` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `notificacao_ibfk_2` FOREIGN KEY (`idColaborador`) REFERENCES `colaborador` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 COMMIT;
 
 /*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;

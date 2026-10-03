@@ -5,7 +5,7 @@ require __DIR__ . '/../includes/app.php';
 $u = exigir_login(['CLIENTE', 'COLABORADOR', 'ADMIN']);
 
 $numero = (int)($_GET['numero'] ?? 0);
-$p = db_one("SELECT p.numero, p.status, p.dataFinalizacao, o.id AS idOcorrencia, o.descricao, o.componentes, o.dataRegistro,
+$p = db_one("SELECT p.numero, p.status, p.dataFinalizacao, p.kmEntrada, p.previsaoEntrega, a.nota, a.comentario, o.id AS idOcorrencia, o.descricao, o.componentes, o.dataRegistro,
                     v.placa, v.ano, v.cor, v.idCliente, mo.nome AS modelo, ma.nome AS marca,
                     c.nome AS cliente, c.cpf, c.telefone, c.email,
                     col.nome AS colaborador, col.cargo
@@ -16,6 +16,7 @@ $p = db_one("SELECT p.numero, p.status, p.dataFinalizacao, o.id AS idOcorrencia,
              JOIN marca ma        ON ma.id = mo.idMarca
              JOIN cliente c       ON c.id = v.idCliente
              JOIN colaborador col ON col.id = p.responsavel
+             LEFT JOIN avaliacao a ON a.numeroProtocolo = p.numero
              WHERE p.numero = ?", [$numero]);
 
 // Cliente só pode ver protocolos dos próprios veículos.
@@ -31,6 +32,7 @@ $itens = db_all('SELECT i.descricao, i.dataHora, c.nome AS colaborador
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Protocolo <?= proto_num($p['numero']) ?> – IMM</title>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
   <style>
@@ -54,6 +56,15 @@ $itens = db_all('SELECT i.descricao, i.dataHora, c.nome AS colaborador
     footer { margin-top: 36px; font-size: 11px; color: #7A7872; text-align: center; }
     .toolbar { max-width: 760px; margin: 0 auto 14px; text-align: right; }
     .toolbar button { padding: 8px 16px; border: none; border-radius: 8px; background: #1A1917; color: #fff; font-family: inherit; cursor: pointer; }
+    @media (max-width: 600px) {
+      body { padding: 12px 8px; }
+      .sheet { padding: 22px 18px; border-radius: 10px; }
+      header { flex-direction: column; gap: 12px; }
+      .proto { text-align: left; }
+      .grid { grid-template-columns: 1fr; }
+      table { display: block; overflow-x: auto; }
+      .toolbar button { width: 100%; padding: 12px; }
+    }
     @media print {
       body { background: #fff; padding: 0; }
       .sheet { border: none; padding: 0; }
@@ -96,6 +107,8 @@ $itens = db_all('SELECT i.descricao, i.dataHora, c.nome AS colaborador
       <div><span>Responsável</span><?= e($p['colaborador']) ?> (<?= e($p['cargo']) ?>)</div>
       <div><span>Aberto em</span><?= fmt_data_hora($p['dataRegistro']) ?></div>
       <div><span>Componente</span><?= e($p['componentes'] ?: '—') ?></div>
+      <div><span>KM entrada</span><?= fmt_km($p['kmEntrada']) ?></div>
+      <?php if ($p['previsaoEntrega']): ?><div><span>Previsão</span><?= fmt_data($p['previsaoEntrega']) ?></div><?php endif; ?>
     </div>
     <p class="resumo" style="margin-top:10px"><?= e($p['descricao']) ?></p>
 
@@ -113,6 +126,11 @@ $itens = db_all('SELECT i.descricao, i.dataHora, c.nome AS colaborador
         <?php endforeach; ?>
       </tbody>
     </table>
+
+    <?php if ($p['nota']): ?>
+    <h2>Avaliação do cliente</h2>
+    <p class="resumo"><?= str_repeat('★', (int)$p['nota']) . str_repeat('☆', 5 - (int)$p['nota']) ?><?= $p['comentario'] ? ' — “' . e($p['comentario']) . '”' : '' ?></p>
+    <?php endif; ?>
 
     <footer>Documento gerado em <?= date('d/m/Y H:i') ?> · IMM – Integrated Mechanical Management</footer>
   </div>

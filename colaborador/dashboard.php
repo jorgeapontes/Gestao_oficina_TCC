@@ -5,22 +5,25 @@ $me = $u['id'];
 
 // ─── ESTATÍSTICAS ────────────────────────────────────────────────────────────
 $emAberto    = (int)db_val("SELECT COUNT(*) FROM protocolo WHERE responsavel = ? AND status = 'ABERTO'", [$me]);
-$emAndamento = (int)db_val("SELECT COUNT(*) FROM protocolo WHERE responsavel = ? AND status = 'EM_ATENDIMENTO'", [$me]);
+$emAndamento = (int)db_val("SELECT COUNT(*) FROM protocolo WHERE responsavel = ? AND status IN " . SQL_ATIVOS . " AND status <> 'ABERTO'", [$me]);
+$atrasados   = (int)db_val("SELECT COUNT(*) FROM protocolo WHERE responsavel = ? AND status IN " . SQL_ATIVOS . " AND previsaoEntrega < CURDATE()", [$me]);
 $finalHoje   = (int)db_val("SELECT COUNT(*) FROM protocolo WHERE responsavel = ? AND status = 'FINALIZADO' AND dataFinalizacao = CURDATE()", [$me]);
 $totalOc     = (int)db_val('SELECT COUNT(*) FROM protocolo WHERE responsavel = ?', [$me]);
 $ocSemana    = (int)db_val('SELECT COUNT(*) FROM protocolo p JOIN ocorrencia o ON o.id = p.idOcorrencia
                             WHERE p.responsavel = ? AND o.dataRegistro >= NOW() - INTERVAL 7 DAY', [$me]);
 $finalMes    = (int)db_val("SELECT COUNT(*) FROM protocolo WHERE responsavel = ? AND status = 'FINALIZADO'
                             AND YEAR(dataFinalizacao) = YEAR(CURDATE()) AND MONTH(dataFinalizacao) = MONTH(CURDATE())", [$me]);
+$minhaNota   = db_one('SELECT AVG(a.nota) AS media, COUNT(*) AS total FROM avaliacao a
+                       JOIN protocolo p ON p.numero = a.numeroProtocolo WHERE p.responsavel = ?', [$me]);
 
 // ─── MEUS ATENDIMENTOS (abas) ────────────────────────────────────────────────
 $abas = [
     'aberto'      => ['Em aberto',        "p.status = 'ABERTO'"],
-    'andamento'   => ['Em andamento',     "p.status = 'EM_ATENDIMENTO'"],
+    'andamento'   => ['Em andamento',     "p.status IN " . SQL_ATIVOS . " AND p.status <> 'ABERTO'"],
     'finalizados' => ['Finalizados hoje', "p.status = 'FINALIZADO' AND p.dataFinalizacao = CURDATE()"],
 ];
-$aba = array_key_exists($_GET['tab'] ?? '', $abas) ? $_GET['tab'] : 'aberto';
-$atendimentos = db_all("SELECT p.numero, p.status, c.nome AS cliente, v.placa, o.descricao
+$aba = array_key_exists($_GET['tab'] ?? '', $abas) ? $_GET['tab'] : ($emAberto || !$emAndamento ? 'aberto' : 'andamento');
+$atendimentos = db_all("SELECT p.numero, p.status, p.previsaoEntrega, c.nome AS cliente, v.placa, o.descricao
                         FROM protocolo p
                         JOIN ocorrencia o ON o.id = p.idOcorrencia
                         JOIN veiculo v    ON v.id = p.idVeiculo
@@ -29,19 +32,21 @@ $atendimentos = db_all("SELECT p.numero, p.status, c.nome AS cliente, v.placa, o
                         ORDER BY p.numero DESC", [$me]);
 
 // ─── VEÍCULO EM FOCO: o do atendimento ativo mais recente ────────────────────
-$foco = db_one("SELECT p.numero, v.id, v.placa, v.ano, v.cor, mo.nome AS modelo, ma.nome AS marca,
+$foco = db_one("SELECT p.numero, p.status, p.previsaoEntrega, v.id, v.placa, v.ano, v.cor, mo.nome AS modelo, ma.nome AS marca,
                        c.nome AS cliente, c.telefone
                 FROM protocolo p
                 JOIN veiculo v ON v.id = p.idVeiculo
                 JOIN modelo mo ON mo.id = v.idModelo
                 JOIN marca ma  ON ma.id = mo.idMarca
                 JOIN cliente c ON c.id = v.idCliente
-                WHERE p.responsavel = ? AND p.status IN ('ABERTO','EM_ATENDIMENTO')
+                WHERE p.responsavel = ? AND p.status IN " . SQL_ATIVOS . "
                 ORDER BY p.status = 'EM_ATENDIMENTO' DESC, p.numero DESC LIMIT 1", [$me]);
 $histFoco = $foco ? db_all("SELECT p.numero, p.dataFinalizacao, o.descricao
                             FROM protocolo p JOIN ocorrencia o ON o.id = p.idOcorrencia
                             WHERE p.idVeiculo = ? AND p.status = 'FINALIZADO'
                             ORDER BY p.numero DESC LIMIT 3", [$foco['id']]) : [];
+
+$revisoes = veiculos_para_revisao(null, 5);
 
 $hora = (int)date('G');
 $saudacao = $hora < 12 ? 'Bom dia' : ($hora < 18 ? 'Boa tarde' : 'Boa noite');
@@ -50,328 +55,21 @@ $pendentes = $emAberto + $emAndamento;
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>IMM – Colaborador</title>
-  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+  <?php head_comum('Meu Painel'); ?>
   <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-    :root {
-      --bg:        #F5F4F2;
-      --surface:   #FFFFFF;
-      --border:    #E4E2DE;
-      --text:      #1A1917;
-      --muted:     #7A7872;
-      --tag-open:  #E8F2EC;
-      --tag-open-t:#2D7A4F;
-      --tag-prog:  #FEF4E4;
-      --tag-prog-t:#A05A00;
-      --tag-done:  #EDECEA;
-      --tag-done-t:#5A5750;
-      --sidebar-w: 230px;
-    }
-
-    body {
-      font-family: 'DM Sans', sans-serif;
-      background: var(--bg);
-      color: var(--text);
-      display: flex;
-      min-height: 100vh;
-    }
-
-    /* ── SIDEBAR ── */
-    aside {
-      width: var(--sidebar-w);
-      min-height: 100vh;
-      background: var(--surface);
-      border-right: 1px solid var(--border);
-      display: flex;
-      flex-direction: column;
-      padding: 28px 0;
-      position: fixed;
-      top: 0; left: 0;
-    }
-    .logo { padding: 0 24px 28px; border-bottom: 1px solid var(--border); }
-    .logo-mark {
-      font-family: 'DM Mono', monospace;
-      font-size: 13px; font-weight: 500;
-      letter-spacing: 0.08em; color: var(--muted);
-      text-transform: uppercase; margin-bottom: 4px;
-    }
-    .logo-name { font-size: 15px; font-weight: 600; line-height: 1.3; }
-
-    nav {
-      flex: 1; padding: 20px 12px;
-      display: flex; flex-direction: column; gap: 2px;
-    }
-    .nav-label {
-      font-size: 10px; font-weight: 500;
-      letter-spacing: 0.1em; text-transform: uppercase;
-      color: var(--muted); padding: 14px 12px 6px;
-    }
-    .nav-item {
-      display: flex; align-items: center; gap: 10px;
-      padding: 9px 12px; border-radius: 8px;
-      font-size: 14px; color: var(--muted);
-      cursor: pointer; text-decoration: none;
-      transition: background 0.15s, color 0.15s;
-    }
-    .nav-item:hover { background: var(--bg); color: var(--text); }
-    .nav-item.active { background: var(--text); color: #fff; }
-    .nav-item .icon { width: 18px; height: 18px; opacity: 0.7; flex-shrink: 0; }
-    .nav-item.active .icon { opacity: 1; }
-
-    .sidebar-footer { padding: 20px 24px 0; border-top: 1px solid var(--border); }
-    .user-chip { display: flex; align-items: center; gap: 10px; }
-    .avatar {
-      width: 32px; height: 32px; border-radius: 50%;
-      background: var(--text); color: #fff;
-      font-size: 12px; font-weight: 600;
-      display: flex; align-items: center; justify-content: center; flex-shrink: 0;
-    }
-    .user-name { font-size: 13px; font-weight: 500; }
-    .user-role { font-size: 11px; color: var(--muted); font-family: 'DM Mono', monospace; }
-
-    /* ── MAIN ── */
-    main { margin-left: var(--sidebar-w); flex: 1; padding: 40px 48px; }
-
-    .topbar {
-      display: flex; align-items: center;
-      justify-content: flex-end; gap: 12px; margin-bottom: 32px;
-    }
-    .search-wrap { position: relative; flex: 1; max-width: 360px; }
-    .search-icon {
-      position: absolute; left: 12px; top: 50%;
-      transform: translateY(-50%); color: var(--muted); pointer-events: none;
-    }
-    .search-input {
-      width: 100%; border: 1px solid var(--border); border-radius: 8px;
-      padding: 9px 12px 9px 36px; font-size: 13.5px;
-      font-family: inherit; background: var(--surface); color: var(--text);
-      outline: none; transition: border-color 0.15s;
-    }
-    .search-input::placeholder { color: var(--muted); }
-    .search-input:focus { border-color: var(--text); }
-    .notif-btn {
-      width: 36px; height: 36px; border: 1px solid var(--border);
-      border-radius: 8px; background: var(--surface);
-      display: flex; align-items: center; justify-content: center;
-      cursor: pointer; position: relative;
-    }
-    .notif-dot {
-      width: 7px; height: 7px; background: #C0392B; border-radius: 50%;
-      position: absolute; top: 7px; right: 7px; border: 1.5px solid white;
-    }
-
-    .page-header {
-      display: flex; align-items: flex-end;
-      justify-content: space-between; margin-bottom: 32px;
-    }
-    .page-title { font-size: 22px; font-weight: 600; letter-spacing: -0.02em; }
-    .page-sub { font-size: 13px; color: var(--muted); margin-top: 4px; }
-    .page-date { font-family: 'DM Mono', monospace; font-size: 12px; color: var(--muted); }
-
-    /* ── STATS ── */
-    .stats-grid {
-      display: grid; grid-template-columns: repeat(3, 1fr);
-      gap: 16px; margin-bottom: 28px;
-    }
-    .stat-card {
-      background: var(--surface); border: 1px solid var(--border);
-      border-radius: 12px; padding: 20px 22px;
-    }
-    .stat-label { font-size: 12px; color: var(--muted); font-weight: 500; letter-spacing: 0.03em; margin-bottom: 10px; }
-    .stat-value { font-size: 30px; font-weight: 600; letter-spacing: -0.03em; line-height: 1; margin-bottom: 8px; }
-    .stat-delta { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 4px; }
-    .stat-delta.up { color: #2D7A4F; }
-
-    /* ── LAYOUT ── */
-    .two-col { display: grid; grid-template-columns: 1fr 320px; gap: 20px; }
-
-    /* ── CARD ── */
-    .card {
-      background: var(--surface); border: 1px solid var(--border);
-      border-radius: 12px; overflow: hidden;
-    }
-    .card-header {
-      padding: 18px 22px; border-bottom: 1px solid var(--border);
-      display: flex; align-items: center; justify-content: space-between;
-    }
-    .card-title { font-size: 14px; font-weight: 600; }
-    .card-action {
-      font-size: 12px; color: var(--muted); cursor: pointer;
-      font-weight: 500; border: none; background: none; font-family: inherit;
-    }
-    .card-action:hover { color: var(--text); }
-
-    /* ── TABS ── */
-    .tab-bar {
-      display: flex; gap: 0;
-      border-bottom: 1px solid var(--border);
-      padding: 0 22px;
-    }
-    .tab {
-      font-size: 13px; font-weight: 500; color: var(--muted);
-      padding: 12px 16px 11px;
-      border-bottom: 2px solid transparent;
-      cursor: pointer; white-space: nowrap;
-      transition: color 0.15s, border-color 0.15s;
-      background: none; border-left: none; border-right: none; border-top: none;
-      font-family: inherit;
-    }
-    .tab:hover { color: var(--text); }
-    .tab.active { color: var(--text); border-bottom-color: var(--text); }
-
-    /* ── TABLE ── */
-    table { width: 100%; border-collapse: collapse; }
-    thead th {
-      text-align: left; font-size: 11px; font-weight: 500;
-      color: var(--muted); letter-spacing: 0.06em; text-transform: uppercase;
-      padding: 10px 22px; border-bottom: 1px solid var(--border);
-    }
-    tbody tr { transition: background 0.1s; }
-    tbody tr:hover { background: var(--bg); }
-    tbody td {
-      padding: 13px 22px; font-size: 13.5px;
-      border-bottom: 1px solid var(--border); vertical-align: middle;
-    }
-    tbody tr:last-child td { border-bottom: none; }
-
-    .td-plate {
-      font-family: 'DM Mono', monospace; font-size: 12.5px;
-      background: var(--bg); padding: 3px 8px;
-      border-radius: 5px; border: 1px solid var(--border); display: inline-block;
-    }
-    .td-proto {
-      font-family: 'DM Mono', monospace; font-size: 12px; color: var(--muted);
-    }
-    .badge {
-      display: inline-flex; align-items: center;
-      font-size: 11.5px; font-weight: 500;
-      padding: 3px 9px; border-radius: 20px;
-    }
-    .badge.open  { background: var(--tag-open);  color: var(--tag-open-t); }
-    .badge.prog  { background: var(--tag-prog);  color: var(--tag-prog-t); }
-    .badge.done  { background: var(--tag-done);  color: var(--tag-done-t); }
-
-    /* ── CLIENT SEARCH CARD ── */
-    .client-search {
-      padding: 16px 22px;
-      border-bottom: 1px solid var(--border);
-    }
-    .input-row { display: flex; gap: 8px; }
-    .field-input {
-      flex: 1; border: 1px solid var(--border); border-radius: 8px;
-      padding: 8px 12px; font-size: 13px; font-family: inherit;
-      background: var(--bg); color: var(--text); outline: none;
-      transition: border-color 0.15s;
-    }
-    .field-input:focus { border-color: var(--text); background: #fff; }
-    .field-input::placeholder { color: var(--muted); }
-    .btn-primary {
-      padding: 8px 16px; border-radius: 8px;
-      background: var(--text); color: #fff;
-      font-size: 13px; font-weight: 500; font-family: inherit;
-      border: none; cursor: pointer; white-space: nowrap;
-      transition: opacity 0.15s;
-    }
-    .btn-primary:hover { opacity: 0.82; }
-    .btn-ghost {
-      padding: 8px 14px; border-radius: 8px;
-      background: none; color: var(--text);
-      font-size: 13px; font-weight: 500; font-family: inherit;
-      border: 1px solid var(--border); cursor: pointer;
-      transition: background 0.15s;
-    }
-    .btn-ghost:hover { background: var(--bg); }
-
-    /* ── OCCURRENCE FORM ── */
-    .form-body { padding: 20px 22px; display: flex; flex-direction: column; gap: 14px; }
-    .form-group { display: flex; flex-direction: column; gap: 5px; }
-    .form-label { font-size: 12px; font-weight: 500; color: var(--muted); letter-spacing: 0.03em; }
-    .form-select {
-      border: 1px solid var(--border); border-radius: 8px;
-      padding: 9px 12px; font-size: 13.5px; font-family: inherit;
-      background: var(--bg); color: var(--text); outline: none;
-      transition: border-color 0.15s; cursor: pointer;
-      appearance: none;
-      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%237A7872' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
-      background-repeat: no-repeat;
-      background-position: right 12px center;
-      padding-right: 32px;
-    }
-    .form-select:focus { border-color: var(--text); background-color: #fff; }
-    .form-textarea {
-      border: 1px solid var(--border); border-radius: 8px;
-      padding: 10px 12px; font-size: 13.5px; font-family: inherit;
-      background: var(--bg); color: var(--text); outline: none;
-      resize: vertical; min-height: 90px; line-height: 1.5;
-      transition: border-color 0.15s;
-    }
-    .form-textarea:focus { border-color: var(--text); background: #fff; }
-    .form-textarea::placeholder { color: var(--muted); }
-    .form-footer {
-      padding: 0 22px 20px;
-      display: flex; gap: 8px; justify-content: flex-end;
-    }
-
-    /* ── RIGHT COLUMN ── */
-    .right-col { display: flex; flex-direction: column; gap: 20px; }
-
-    /* vehicle info */
-    .vehicle-info { padding: 18px 22px; display: flex; flex-direction: column; gap: 12px; }
-    .vi-row { display: flex; justify-content: space-between; align-items: center; }
-    .vi-key { font-size: 12px; color: var(--muted); font-weight: 500; }
-    .vi-val { font-size: 13px; font-weight: 500; }
-    .vi-val.mono { font-family: 'DM Mono', monospace; }
-    .vi-divider { height: 1px; background: var(--border); }
-
-    /* history mini */
     .hist-list { padding: 0 22px; }
-    .hist-item {
-      display: flex; gap: 12px;
-      padding: 13px 0;
-      border-bottom: 1px solid var(--border);
-      align-items: flex-start;
-    }
+    .hist-item { display: flex; gap: 12px; padding: 13px 0; border-bottom: 1px solid var(--border); align-items: flex-start; }
     .hist-item:last-child { border-bottom: none; }
-    .hist-badge {
-      font-family: 'DM Mono', monospace; font-size: 10.5px;
-      background: var(--bg); border: 1px solid var(--border);
-      border-radius: 5px; padding: 2px 6px;
-      white-space: nowrap; margin-top: 1px; flex-shrink: 0;
-    }
-    .hist-desc { font-size: 13px; line-height: 1.45; color: var(--text); }
+    .hist-badge { font-family: 'DM Mono', monospace; font-size: 10.5px; background: var(--bg); border: 1px solid var(--border); border-radius: 5px; padding: 2px 6px; white-space: nowrap; margin-top: 1px; flex-shrink: 0; }
+    .hist-desc { font-size: 13px; line-height: 1.45; }
     .hist-date { font-size: 11px; color: var(--muted); font-family: 'DM Mono', monospace; margin-top: 2px; }
-
-    /* empty state */
-    .empty-state {
-      padding: 32px 22px; text-align: center;
-      color: var(--muted); font-size: 13px; line-height: 1.6;
-    }
-    .empty-icon { font-size: 28px; margin-bottom: 8px; }
-
-    /* section header row */
-    .section-row {
-      display: flex; align-items: center; justify-content: space-between;
-      margin-bottom: 16px;
-    }
-    .section-title { font-size: 14px; font-weight: 600; }
+    @media (max-width: 760px) { .hist-list { padding: 0 16px; } }
   </style>
 </head>
 <body>
-<style>
-  a.tab, a.card-action { text-decoration: none; display: inline-block; }
-  tbody tr[data-href] { cursor: pointer; }
-</style>
-
 <?php sidebar('dashboard'); ?>
 
-<!-- MAIN -->
 <main>
-
-  <!-- topbar -->
   <div class="topbar">
     <form class="search-wrap" method="GET" action="veiculos.php">
       <svg class="search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
@@ -379,7 +77,6 @@ $pendentes = $emAberto + $emAndamento;
     </form>
   </div>
 
-  <!-- header -->
   <div class="page-header">
     <div>
       <div class="page-title">Meu Painel</div>
@@ -389,34 +86,32 @@ $pendentes = $emAberto + $emAndamento;
     <div class="page-date"><?= data_hoje() ?></div>
   </div>
 
-  <!-- stats -->
   <div class="stats-grid">
     <div class="stat-card">
-      <div class="stat-label">Meus atendimentos ativos</div>
+      <div class="stat-label">Atendimentos ativos</div>
       <div class="stat-value"><?= $pendentes ?></div>
-      <div class="stat-delta"><?= $emAberto ?> em aberto · <?= $emAndamento ?> em andamento · <?= $finalHoje ?> finalizados hoje</div>
+      <div class="stat-delta<?= $atrasados ? ' down' : '' ?>"><?= $atrasados ? plural($atrasados, 'atrasado', 'atrasados') . ' · ' : '' ?><?= $emAberto ?> aberto<?= $emAberto === 1 ? '' : 's' ?> · <?= $emAndamento ?> em andamento</div>
     </div>
     <div class="stat-card">
       <div class="stat-label">Ocorrências registradas</div>
       <div class="stat-value"><?= $totalOc ?></div>
-      <div class="stat-delta<?= $ocSemana ? ' up' : '' ?>">
-        <?php if ($ocSemana): ?><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 15l-6-6-6 6"/></svg><?php endif; ?>
-        +<?= $ocSemana ?> esta semana
-      </div>
+      <div class="stat-delta<?= $ocSemana ? ' up' : '' ?>">+<?= $ocSemana ?> esta semana</div>
     </div>
     <div class="stat-card">
-      <div class="stat-label">Protocolos finalizados (mês)</div>
+      <div class="stat-label">Finalizados no mês</div>
       <div class="stat-value"><?= $finalMes ?></div>
-      <div class="stat-delta"><?= ucfirst(MESES[(int)date('n')]) ?> de <?= date('Y') ?></div>
+      <div class="stat-delta"><?= $finalHoje ?> hoje · <?= ucfirst(MESES[(int)date('n')]) ?></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Minha avaliação</div>
+      <div class="stat-value"><?= $minhaNota['total'] ? number_format((float)$minhaNota['media'], 1, ',', '') : '—' ?></div>
+      <div class="stat-delta"><?= $minhaNota['total'] ? estrelas((int)round($minhaNota['media'])) . ' ' . plural((int)$minhaNota['total'], 'avaliação', 'avaliações') : 'Sem avaliações ainda' ?></div>
     </div>
   </div>
 
-  <!-- two col -->
   <div class="two-col">
 
-    <!-- LEFT: meus atendimentos + nova ocorrência -->
-    <div style="display:flex; flex-direction:column; gap:20px;">
-
+    <div class="stack">
       <!-- Meus atendimentos -->
       <div class="card">
         <div class="card-header">
@@ -436,7 +131,7 @@ $pendentes = $emAberto + $emAndamento;
             Nenhum atendimento nesta aba.
           </div>
         <?php else: ?>
-        <table>
+        <table class="table-stack">
           <thead>
             <tr>
               <th>Protocolo</th>
@@ -449,11 +144,14 @@ $pendentes = $emAberto + $emAndamento;
           <tbody>
             <?php foreach ($atendimentos as $a): ?>
             <tr data-href="atendimento.php?numero=<?= (int)$a['numero'] ?>">
-              <td><span class="td-proto"><?= proto_num($a['numero']) ?></span></td>
-              <td><?= e($a['cliente']) ?></td>
-              <td><span class="td-plate"><?= e($a['placa']) ?></span></td>
-              <td><?= e(mb_strimwidth($a['descricao'], 0, 48, '…')) ?></td>
-              <td><?= badge(status_protocolo($a['status'])) ?></td>
+              <td data-label="Protocolo"><span class="td-proto"><?= proto_num($a['numero']) ?></span></td>
+              <td data-label="Cliente"><?= e($a['cliente']) ?></td>
+              <td data-label="Veículo"><span class="td-plate"><?= e($a['placa']) ?></span></td>
+              <td data-label="Ocorrência"><?= e(mb_strimwidth($a['descricao'], 0, 48, '…')) ?></td>
+              <td data-label="Status">
+                <?= badge(status_protocolo($a['status'])) ?>
+                <?php if (atrasado($a['previsaoEntrega'], $a['status'])): ?><span class="badge late">Atrasado</span><?php endif; ?>
+              </td>
             </tr>
             <?php endforeach; ?>
           </tbody>
@@ -461,7 +159,7 @@ $pendentes = $emAberto + $emAndamento;
         <?php endif; ?>
       </div>
 
-      <!-- Registrar ocorrência -->
+      <!-- Registrar ocorrência rápida -->
       <form class="card" method="POST" action="registrar_ocorrencia.php">
         <?= csrf_field() ?>
         <input type="hidden" name="_action" value="registrar"/>
@@ -471,41 +169,33 @@ $pendentes = $emAberto + $emAndamento;
         </div>
 
         <div class="form-body">
-          <div class="form-group">
-            <label class="form-label">Placa do veículo</label>
-            <input class="field-input" type="text" name="placa" placeholder="ABC-1234" maxlength="8" style="text-transform:uppercase" required/>
+          <div class="field-row">
+            <div class="field">
+              <label for="q-placa">Placa do veículo</label>
+              <input id="q-placa" type="text" name="placa" placeholder="ABC-1234" maxlength="8" style="text-transform:uppercase" data-mask="placa" required/>
+            </div>
+            <div class="field">
+              <label for="q-comp">Componente afetado</label>
+              <select id="q-comp" name="componentes">
+                <option value="">— selecione —</option>
+                <option>Freios</option><option>Motor</option><option>Suspensão</option><option>Embreagem</option>
+                <option>Transmissão</option><option>Sistema elétrico</option><option>Outros</option>
+              </select>
+            </div>
           </div>
-
-          <div class="form-group">
-            <label class="form-label">Componente afetado</label>
-            <select class="form-select" name="componentes">
-              <option value="">— selecione o componente —</option>
-              <option>Freios</option>
-              <option>Motor</option>
-              <option>Suspensão</option>
-              <option>Embreagem</option>
-              <option>Transmissão</option>
-              <option>Sistema elétrico</option>
-              <option>Outros</option>
-            </select>
-          </div>
-
-          <div class="form-group">
-            <label class="form-label">Descrição do problema</label>
-            <textarea class="form-textarea" name="itens[]" maxlength="200" required placeholder="Descreva o problema identificado, sintomas observados e condição do componente…"></textarea>
+          <div class="field">
+            <label for="q-desc">Descrição do problema</label>
+            <textarea id="q-desc" name="itens[]" maxlength="200" required placeholder="Descreva o problema identificado, sintomas observados e condição do componente…"></textarea>
           </div>
         </div>
-        <div class="form-footer">
-          <button type="reset" class="btn-ghost">Limpar</button>
+        <div class="form-actions">
+          <button type="reset" class="btn-outline">Limpar</button>
           <button type="submit" class="btn-primary">Registrar ocorrência</button>
         </div>
       </form>
-
     </div>
 
-    <!-- RIGHT -->
-    <div class="right-col">
-
+    <div class="stack">
       <!-- Veículo em foco -->
       <div class="card">
         <div class="card-header">
@@ -515,20 +205,20 @@ $pendentes = $emAberto + $emAndamento;
         <?php if (!$foco): ?>
           <div class="empty-state">Nenhum atendimento ativo no momento.</div>
         <?php else: ?>
-        <div class="vehicle-info">
-          <div class="vi-row"><span class="vi-key">Placa</span><span class="vi-val mono"><?= e($foco['placa']) ?></span></div>
-          <div class="vi-divider"></div>
-          <div class="vi-row"><span class="vi-key">Modelo</span><span class="vi-val"><?= e($foco['marca'] . ' ' . $foco['modelo']) ?></span></div>
-          <div class="vi-row"><span class="vi-key">Ano</span><span class="vi-val"><?= e($foco['ano']) ?></span></div>
-          <div class="vi-row"><span class="vi-key">Cor</span><span class="vi-val"><?= e($foco['cor']) ?></span></div>
-          <div class="vi-divider"></div>
-          <div class="vi-row"><span class="vi-key">Proprietário</span><span class="vi-val"><?= e($foco['cliente']) ?></span></div>
-          <div class="vi-row"><span class="vi-key">Contato</span><span class="vi-val mono" style="font-size:12px;"><?= e(fmt_tel($foco['telefone'])) ?></span></div>
+        <div class="kv-list">
+          <div class="kv-row"><span class="kv-key">Placa</span><span class="kv-val mono"><?= e($foco['placa']) ?></span></div>
+          <div class="kv-row"><span class="kv-key">Status</span><?= badge(status_protocolo($foco['status'])) ?></div>
+          <div class="kv-divider"></div>
+          <div class="kv-row"><span class="kv-key">Modelo</span><span class="kv-val"><?= e($foco['marca'] . ' ' . $foco['modelo']) ?></span></div>
+          <div class="kv-row"><span class="kv-key">Ano / Cor</span><span class="kv-val"><?= e($foco['ano'] . ' · ' . $foco['cor']) ?></span></div>
+          <div class="kv-row"><span class="kv-key">Previsão</span><span class="kv-val<?= atrasado($foco['previsaoEntrega'], $foco['status']) ? ' text-danger' : '' ?>"><?= fmt_data($foco['previsaoEntrega']) ?></span></div>
+          <div class="kv-divider"></div>
+          <div class="kv-row"><span class="kv-key">Proprietário</span><span class="kv-val"><?= e($foco['cliente']) ?></span></div>
+          <div class="kv-row"><span class="kv-key">Contato</span><span class="kv-val mono" style="font-size:12px"><?= e(fmt_tel($foco['telefone'])) ?></span></div>
         </div>
         <?php endif; ?>
       </div>
 
-      <!-- Histórico do veículo -->
       <?php if ($foco): ?>
       <div class="card">
         <div class="card-header">
@@ -541,7 +231,7 @@ $pendentes = $emAberto + $emAndamento;
         <div class="hist-list">
           <?php foreach ($histFoco as $h): ?>
           <div class="hist-item">
-            <div><div class="hist-badge"><?= proto_num($h['numero']) ?></div></div>
+            <div class="hist-badge"><?= proto_num($h['numero']) ?></div>
             <div>
               <div class="hist-desc"><?= e($h['descricao']) ?></div>
               <div class="hist-date"><?= fmt_data_curta($h['dataFinalizacao']) ?></div>
@@ -553,28 +243,44 @@ $pendentes = $emAberto + $emAndamento;
       </div>
       <?php endif; ?>
 
-      <!-- Cadastrar veículo -->
+      <!-- Revisões pendentes -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">Revisão recomendada</div>
+          <span class="card-meta">+<?= MESES_REVISAO ?> meses</span>
+        </div>
+        <?php if (!$revisoes): ?>
+          <div class="empty-state">Nenhum veículo com revisão pendente.</div>
+        <?php else: ?>
+        <div class="reminder-list">
+          <?php foreach ($revisoes as $r): ?>
+          <div class="reminder-item">
+            <span class="td-plate"><?= e($r['placa']) ?></span>
+            <div class="grow">
+              <div><?= e($r['cliente']) ?></div>
+              <div class="reminder-sub">Último serviço há <?= plural(meses_desde($r['ultimo']), 'mês', 'meses') ?> · <?= e(fmt_tel($r['telefone'])) ?></div>
+            </div>
+          </div>
+          <?php endforeach; ?>
+        </div>
+        <?php endif; ?>
+      </div>
+
       <div class="card">
         <div class="card-header">
           <div class="card-title">Cadastrar veículo</div>
         </div>
-        <div class="form-body" style="font-size:13px;color:var(--muted);line-height:1.6">
+        <div class="card-text">
           Veículo ainda não cadastrado? Cadastre-o vinculado ao cliente proprietário antes de registrar a ocorrência.
         </div>
-        <div class="form-footer">
-          <a class="btn-primary" href="veiculos.php?novo=1" style="width:100%;text-align:center;text-decoration:none">Cadastrar veículo</a>
+        <div class="card-footer" style="border-top:none;padding-top:0">
+          <a class="btn-primary btn-block" href="veiculos.php?novo=1">Cadastrar veículo</a>
         </div>
       </div>
-
     </div>
   </div>
-
 </main>
 
 <?php flash_html(); ?>
-
-<script>
-  document.querySelectorAll('tr[data-href]').forEach(tr => tr.addEventListener('click', () => location.href = tr.dataset.href));
-</script>
 </body>
 </html>

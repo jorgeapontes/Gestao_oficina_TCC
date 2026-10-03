@@ -5,18 +5,20 @@ $u = exigir_login(['COLABORADOR', 'ADMIN']);
 $numero = (int)($_GET['numero'] ?? $_POST['numero'] ?? 0);
 
 function carregar_protocolo(int $numero): ?array {
-    return db_one("SELECT p.numero, p.status, p.dataFinalizacao, p.responsavel,
+    return db_one("SELECT p.numero, p.status, p.dataFinalizacao, p.responsavel, p.kmEntrada, p.previsaoEntrega,
                           o.id AS idOcorrencia, o.descricao, o.componentes, o.dataRegistro,
-                          v.placa, v.ano, v.cor, mo.nome AS modelo, ma.nome AS marca,
+                          v.placa, v.ano, v.cor, v.idCliente, mo.nome AS modelo, ma.nome AS marca,
                           c.nome AS cliente, c.telefone, c.email AS clienteEmail,
-                          col.nome AS responsavelNome, col.cargo AS responsavelCargo
+                          col.nome AS responsavelNome, col.cargo AS responsavelCargo,
+                          a.nota, a.comentario, a.dataHora AS dataAvaliacao
                    FROM protocolo p
-                   JOIN ocorrencia o   ON o.id = p.idOcorrencia
-                   JOIN veiculo v      ON v.id = p.idVeiculo
-                   JOIN modelo mo      ON mo.id = v.idModelo
-                   JOIN marca ma       ON ma.id = mo.idMarca
-                   JOIN cliente c      ON c.id = v.idCliente
+                   JOIN ocorrencia o    ON o.id = p.idOcorrencia
+                   JOIN veiculo v       ON v.id = p.idVeiculo
+                   JOIN modelo mo       ON mo.id = v.idModelo
+                   JOIN marca ma        ON ma.id = mo.idMarca
+                   JOIN cliente c       ON c.id = v.idCliente
                    JOIN colaborador col ON col.id = p.responsavel
+                   LEFT JOIN avaliacao a ON a.numeroProtocolo = p.numero
                    WHERE p.numero = ?", [$numero]);
 }
 
@@ -25,8 +27,11 @@ if (!$p) {
     flash('err', 'Atendimento não encontrado.');
     redirecionar('dashboard.php');
 }
-$ativo = in_array($p['status'], ['ABERTO', 'EM_ATENDIMENTO'], true);
+$ativo = in_array($p['status'], STATUS_ATIVOS, true);
 $self  = 'atendimento.php?numero=' . $numero;
+
+// Etapas intermediárias que o colaborador pode escolher (além de finalizar/cancelar).
+const ETAPAS_INTERMEDIARIAS = ['AGUARDANDO_APROVACAO', 'EM_ATENDIMENTO', 'AGUARDANDO_PECAS', 'PRONTO'];
 
 // ─── AÇÕES ───────────────────────────────────────────────────────────────────
 // Protocolos finalizados/cancelados são imutáveis: nenhuma ação é aceita.
@@ -49,172 +54,135 @@ if (acao() === 'item') {
 
 if (acao() === 'status') {
     $novo = post('status');
-    $permitidos = $p['status'] === 'ABERTO' ? ['EM_ATENDIMENTO', 'FINALIZADO', 'CANCELADO'] : ['FINALIZADO', 'CANCELADO'];
+    $permitidos = array_merge(array_diff(ETAPAS_INTERMEDIARIAS, [$p['status']]), ['FINALIZADO', 'CANCELADO']);
     if (!in_array($novo, $permitidos, true)) {
         flash('err', 'Mudança de status inválida.');
     } else {
-        mudar_status_protocolo($numero, $novo);
-        // Quem inicia um atendimento aberto passa a ser o responsável por ele.
+        // Quem inicia o serviço passa a ser o responsável por ele.
         if ($novo === 'EM_ATENDIMENTO' && $p['responsavel'] !== $u['id']) {
             db_exec('UPDATE protocolo SET responsavel = ? WHERE numero = ?', [$u['id'], $numero]);
         }
+        mudar_status_protocolo($numero, $novo, $u['id']);
         flash('ok', match ($novo) {
-            'EM_ATENDIMENTO' => 'Atendimento iniciado.',
-            'FINALIZADO'     => 'Atendimento finalizado. O protocolo foi para o histórico.',
-            'CANCELADO'      => 'Atendimento cancelado.',
+            'FINALIZADO' => 'Atendimento finalizado. O protocolo foi para o histórico.',
+            'CANCELADO'  => 'Atendimento cancelado.',
+            default      => 'Status alterado para "' . status_protocolo($novo)[1] . '". O cliente foi notificado.',
         });
     }
     redirecionar($self);
 }
 
+if (acao() === 'dados') {
+    $km       = so_digitos(post('kmEntrada'));
+    $previsao = post('previsaoEntrega');
+    if ($previsao !== '' && !DateTime::createFromFormat('Y-m-d', $previsao)) {
+        flash('err', 'Data de previsão inválida.');
+        redirecionar($self);
+    }
+    $previsao = $previsao !== '' ? $previsao : null;
+    db_exec('UPDATE protocolo SET kmEntrada = ?, previsaoEntrega = ? WHERE numero = ?',
+            [$km !== '' ? (int)$km : null, $previsao, $numero]);
+    if ($previsao && $previsao !== $p['previsaoEntrega']) {
+        notificar_cliente($p['idCliente'], $p['placa'] . ' · Previsão de entrega',
+                          'A previsão de entrega do seu veículo é ' . fmt_data($previsao) . '.',
+                          'cliente/visualizar_ocorrencias.php?numero=' . $numero);
+    }
+    flash('ok', 'Dados do atendimento atualizados.');
+    redirecionar($self);
+}
+
+if (acao() === 'foto') {
+    $legenda = mb_substr(post('legenda'), 0, 150);
+    $arquivos = $_FILES['fotos'] ?? null;
+    $tipos = [IMAGETYPE_JPEG => 'jpg', IMAGETYPE_PNG => 'png', IMAGETYPE_WEBP => 'webp', IMAGETYPE_GIF => 'gif'];
+    $salvas = 0;
+    $erros  = [];
+    $pasta  = __DIR__ . '/../' . PASTA_FOTOS;
+    if (!is_dir($pasta)) mkdir($pasta, 0775, true);
+
+    foreach ((array)($arquivos['name'] ?? []) as $i => $nome) {
+        $erro = $arquivos['error'][$i];
+        if ($erro === UPLOAD_ERR_NO_FILE) continue;
+        if ($erro !== UPLOAD_ERR_OK || $arquivos['size'][$i] > TAMANHO_MAX_FOTO) {
+            $erros[] = "$nome: arquivo muito grande ou envio interrompido";
+            continue;
+        }
+        $info = @getimagesize($arquivos['tmp_name'][$i]);
+        if (!$info || !isset($tipos[$info[2]])) {
+            $erros[] = "$nome: formato não suportado (use JPG, PNG, WEBP ou GIF)";
+            continue;
+        }
+        $arquivo = uuid() . '.' . $tipos[$info[2]];
+        if (move_uploaded_file($arquivos['tmp_name'][$i], $pasta . $arquivo)) {
+            db_exec('INSERT INTO foto (id, numeroProtocolo, arquivo, legenda, idColaborador) VALUES (?,?,?,?,?)',
+                    [uuid(), $numero, $arquivo, $legenda !== '' ? $legenda : null, $u['id']]);
+            $salvas++;
+        }
+    }
+    if ($salvas) {
+        notificar_cliente($p['idCliente'], $p['placa'] . ' · Novas fotos',
+                          plural($salvas, 'foto foi adicionada', 'fotos foram adicionadas') . ' ao atendimento.',
+                          'cliente/visualizar_ocorrencias.php?numero=' . $numero);
+    }
+    if ($erros) flash('err', ($salvas ? plural($salvas, 'foto enviada', 'fotos enviadas') . '. ' : '') . implode('; ', $erros) . '.');
+    elseif ($salvas) flash('ok', plural($salvas, 'foto adicionada', 'fotos adicionadas') . ' ao atendimento.');
+    else flash('err', 'Selecione ao menos uma foto.');
+    redirecionar($self . '#fotos');
+}
+
+if (acao() === 'remover_foto') {
+    $foto = db_one('SELECT id, arquivo FROM foto WHERE id = ? AND numeroProtocolo = ?', [post('id'), $numero]);
+    if ($foto) {
+        db_exec('DELETE FROM foto WHERE id = ?', [$foto['id']]);
+        @unlink(__DIR__ . '/../' . PASTA_FOTOS . $foto['arquivo']);
+        flash('ok', 'Foto removida.');
+    }
+    redirecionar($self . '#fotos');
+}
+
 $itens = db_all('SELECT i.descricao, i.dataHora, c.nome AS colaborador
                  FROM itemocorrencia i JOIN colaborador c ON c.id = i.idColaborador
                  WHERE i.idOcorrencia = ? ORDER BY i.dataHora, i.id', [$p['idOcorrencia']]);
+$etapas = etapas_protocolo($numero);
+$fotos  = fotos_protocolo($numero);
+$late   = atrasado($p['previsaoEntrega'], $p['status']);
+$tel    = so_digitos($p['telefone']);
 ?>
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>IMM – Atendimento</title>
-  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+  <?php head_comum('Atendimento ' . proto_num($p['numero'])); ?>
   <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    :root {
-      --bg: #F5F4F2; --surface: #FFFFFF; --border: #E4E2DE;
-      --text: #1A1917; --muted: #7A7872; --sidebar-w: 230px;
-      --tag-open: #E8F2EC; --tag-open-t: #2D7A4F;
-      --tag-prog: #FEF4E4; --tag-prog-t: #A05A00;
-      --tag-done: #EDECEA; --tag-done-t: #5A5750;
+    .status-picker { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+    .status-option {
+      display: flex; align-items: center; gap: 10px;
+      padding: 11px 12px;
+      border: 1px solid var(--border); border-radius: 9px;
+      background: var(--surface);
+      font-size: 13px; font-weight: 500; text-align: left;
+      cursor: pointer;
+      transition: border-color .15s, background .15s;
     }
-    body { font-family: 'DM Sans', sans-serif; background: var(--bg); color: var(--text); display: flex; min-height: 100vh; }
-    aside { width: var(--sidebar-w); min-height: 100vh; background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; padding: 28px 0; position: fixed; top: 0; left: 0; }
-    .logo { padding: 0 24px 28px; border-bottom: 1px solid var(--border); }
-    .logo-mark { font-family: 'DM Mono', monospace; font-size: 13px; font-weight: 500; letter-spacing: 0.08em; color: var(--muted); text-transform: uppercase; margin-bottom: 4px; }
-    .logo-name { font-size: 15px; font-weight: 600; line-height: 1.3; }
-    nav { flex: 1; padding: 20px 12px; display: flex; flex-direction: column; gap: 2px; }
-    .nav-label { font-size: 10px; font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); padding: 14px 12px 6px; }
-    .nav-item { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 8px; font-size: 14px; color: var(--muted); cursor: pointer; text-decoration: none; transition: background 0.15s, color 0.15s; }
-    .nav-item:hover { background: var(--bg); color: var(--text); }
-    .nav-item.active { background: var(--text); color: #fff; }
-    .nav-item .icon { width: 18px; height: 18px; opacity: 0.7; flex-shrink: 0; }
-    .nav-item.active .icon { opacity: 1; }
-    .sidebar-footer { padding: 20px 24px 0; border-top: 1px solid var(--border); }
-    .user-chip { display: flex; align-items: center; gap: 10px; }
-    .avatar { width: 32px; height: 32px; border-radius: 50%; background: var(--text); color: #fff; font-size: 12px; font-weight: 600; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
-    .user-name { font-size: 13px; font-weight: 500; }
-    .user-role { font-size: 11px; color: var(--muted); font-family: 'DM Mono', monospace; }
-    main { margin-left: var(--sidebar-w); flex: 1; padding: 40px 48px; }
-    .topbar { display: flex; align-items: center; justify-content: flex-end; gap: 12px; margin-bottom: 32px; }
-    .search-wrap { position: relative; flex: 1; max-width: 360px; }
-    .search-icon { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--muted); pointer-events: none; }
-    .search-input { width: 100%; border: 1px solid var(--border); border-radius: 8px; padding: 9px 12px 9px 36px; font-size: 13.5px; font-family: inherit; background: var(--surface); color: var(--text); outline: none; transition: border-color 0.15s; }
-    .search-input::placeholder { color: var(--muted); }
-    .search-input:focus { border-color: var(--text); }
-    .notif-btn { width: 36px; height: 36px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); display: flex; align-items: center; justify-content: center; cursor: pointer; position: relative; }
-    .notif-dot { width: 7px; height: 7px; background: #C0392B; border-radius: 50%; position: absolute; top: 7px; right: 7px; border: 1.5px solid white; }
-
-    .page-title { font-size: 22px; font-weight: 600; letter-spacing: -0.02em; margin-bottom: 6px; }
-    .page-sub { font-size: 13px; color: var(--muted); margin-bottom: 32px; }
-
-    .two-col { display: grid; grid-template-columns: 1fr 360px; gap: 24px; align-items: start; }
-
-    /* FORM CARD */
-    .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
-    .card-header { padding: 18px 22px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
-    .card-title { font-size: 14px; font-weight: 600; }
-
-    .form-body { padding: 22px; display: flex; flex-direction: column; gap: 16px; }
-    .field { display: flex; flex-direction: column; gap: 6px; }
-    .field label { font-size: 12.5px; font-weight: 500; color: var(--muted); letter-spacing: 0.02em; }
-    .field input, .field select, .field textarea {
-      width: 100%; border: 1px solid var(--border); border-radius: 8px;
-      padding: 10px 14px; font-size: 13.5px; font-family: inherit;
-      background: var(--surface); color: var(--text); outline: none;
-      transition: border-color 0.15s; -webkit-appearance: none;
+    .status-option:hover { border-color: var(--text); }
+    .status-option.current { border-color: var(--accent); background: var(--bg); cursor: default; }
+    .status-option .dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+    .dot.wait { background: var(--tag-wait-t); } .dot.prog { background: var(--tag-prog-t); }
+    .dot.ready { background: var(--tag-ready-t); }
+    .closing-actions { display: flex; gap: 10px; justify-content: space-between; flex-wrap: wrap; }
+    .closed-note { padding: 14px 22px; font-size: 13px; color: var(--muted); border-top: 1px solid var(--border); line-height: 1.6; }
+    .rating-box { padding: 18px 22px; }
+    .rating-box .stars { font-size: 20px; }
+    .rating-comment { font-size: 13px; line-height: 1.55; margin-top: 10px; color: var(--text); }
+    .contact-links { display: flex; gap: 8px; padding: 0 22px 18px; flex-wrap: wrap; }
+    @media (max-width: 760px) {
+      .status-picker { grid-template-columns: 1fr; }
+      .closing-actions > * { flex: 1; }
+      .closing-actions form, .closing-actions button { width: 100%; }
+      .contact-links { padding: 0 16px 16px; }
     }
-    .field input::placeholder, .field textarea::placeholder { color: var(--muted); }
-    .field input:focus, .field select:focus, .field textarea:focus { border-color: var(--text); }
-    .field input[readonly] { background: var(--bg); }
-    .field textarea { resize: vertical; min-height: 90px; }
-    .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-
-    /* VEHICLE FOUND */
-    .vehicle-found {
-      border: 1px solid var(--border); border-radius: 8px;
-      padding: 14px 16px; background: var(--bg);
-      display: flex; align-items: center; gap: 14px;
-      display: none;
-    }
-    .vehicle-found.show { display: flex; }
-    .vf-plate { font-family: 'DM Mono', monospace; font-size: 13px; font-weight: 500; background: var(--surface); border: 1px solid var(--border); border-radius: 5px; padding: 4px 10px; }
-    .vf-info { flex: 1; }
-    .vf-name { font-size: 13.5px; font-weight: 600; }
-    .vf-client { font-size: 12px; color: var(--muted); margin-top: 2px; }
-    .vf-badge { font-size: 11.5px; font-weight: 500; padding: 3px 9px; border-radius: 20px; background: var(--tag-open); color: var(--tag-open-t); }
-
-    /* ITEMS */
-    .items-section { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
-    .items-header { padding: 12px 16px; background: var(--bg); border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
-    .items-label { font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.07em; }
-    .btn-add-item { display: flex; align-items: center; gap: 5px; border: none; background: none; font-family: inherit; font-size: 12.5px; font-weight: 500; color: var(--muted); cursor: pointer; }
-    .btn-add-item:hover { color: var(--text); }
-    .items-list { padding: 12px; display: flex; flex-direction: column; gap: 8px; }
-    .item-row { display: flex; align-items: flex-start; gap: 8px; }
-    .item-num { font-family: 'DM Mono', monospace; font-size: 11px; color: var(--muted); padding-top: 11px; width: 24px; flex-shrink: 0; }
-    .item-input { flex: 1; border: 1px solid var(--border); border-radius: 7px; padding: 9px 12px; font-size: 13px; font-family: inherit; background: var(--surface); color: var(--text); outline: none; resize: none; min-height: 40px; transition: border-color 0.15s; }
-    .item-input::placeholder { color: var(--muted); }
-    .item-input:focus { border-color: var(--text); }
-    .btn-remove-item { width: 28px; height: 28px; border: 1px solid var(--border); border-radius: 6px; background: transparent; display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--muted); margin-top: 6px; flex-shrink: 0; }
-    .btn-remove-item:hover { border-color: #C0392B; color: #C0392B; }
-
-    .form-actions { padding: 18px 22px; border-top: 1px solid var(--border); display: flex; gap: 10px; justify-content: flex-end; }
-    .btn-primary { padding: 9px 20px; background: var(--text); color: #fff; border: none; border-radius: 8px; font-family: inherit; font-size: 13.5px; font-weight: 500; cursor: pointer; transition: opacity 0.15s; }
-    .btn-primary:hover { opacity: 0.85; }
-    .btn-outline { padding: 9px 20px; background: transparent; color: var(--muted); border: 1px solid var(--border); border-radius: 8px; font-family: inherit; font-size: 13.5px; font-weight: 500; cursor: pointer; }
-    .btn-outline:hover { border-color: var(--text); color: var(--text); }
-
-    /* SIDE CARD */
-    .side-card { display: flex; flex-direction: column; gap: 16px; }
-    .info-list { padding: 18px 22px; display: flex; flex-direction: column; gap: 14px; }
-    .info-item label { font-size: 11px; color: var(--muted); font-weight: 500; text-transform: uppercase; letter-spacing: 0.06em; display: block; margin-bottom: 3px; }
-    .info-item span { font-size: 13.5px; font-weight: 500; }
-    .badge { display: inline-flex; align-items: center; font-size: 11.5px; font-weight: 500; padding: 3px 9px; border-radius: 20px; }
-    .badge.open { background: var(--tag-open); color: var(--tag-open-t); }
-    .badge.prog { background: var(--tag-prog); color: var(--tag-prog-t); }
-
-    /* SUCCESS */
-    .success-overlay {
-      display: none; position: fixed; inset: 0;
-      background: rgba(26,25,23,0.35);
-      align-items: center; justify-content: center; z-index: 100;
-    }
-    .success-overlay.show { display: flex; }
-    .success-modal { background: var(--surface); border-radius: 14px; padding: 40px 44px; text-align: center; max-width: 380px; }
-    .success-icon { font-size: 40px; margin-bottom: 16px; }
-    .success-title { font-size: 18px; font-weight: 600; margin-bottom: 8px; }
-    .success-sub { font-size: 13px; color: var(--muted); margin-bottom: 24px; }
-    .success-code { font-family: 'DM Mono', monospace; font-size: 22px; font-weight: 500; letter-spacing: 0.05em; margin-bottom: 24px; }
   </style>
 </head>
 <body>
-<style>
-  .badge.done { background: var(--tag-done); color: var(--tag-done-t); }
-  .page-head { display: flex; align-items: flex-end; justify-content: space-between; margin-bottom: 32px; gap: 16px; }
-  .page-head .page-sub { margin-bottom: 0; }
-  .proto-code { font-family: 'DM Mono', monospace; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
-  .occ-summary { padding: 18px 22px; border-bottom: 1px solid var(--border); display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-  .occ-summary .info-item.full { grid-column: 1 / -1; }
-  .item-view { display: flex; gap: 12px; padding: 12px 16px; background: var(--bg); border: 1px solid var(--border); border-radius: 9px; }
-  .item-view .item-num { padding-top: 1px; width: auto; }
-  .item-desc { font-size: 13.5px; line-height: 1.5; }
-  .item-meta { font-size: 11px; color: var(--muted); font-family: 'DM Mono', monospace; margin-top: 4px; }
-  .status-actions { display: flex; gap: 10px; flex-wrap: wrap; }
-  .btn-danger-outline { padding: 9px 20px; background: transparent; color: #C0392B; border: 1px solid #F0C4BF; border-radius: 8px; font-family: inherit; font-size: 13.5px; font-weight: 500; cursor: pointer; }
-  .btn-danger-outline:hover { background: #FEF0EE; }
-  .closed-note { padding: 14px 22px; font-size: 13px; color: var(--muted); border-top: 1px solid var(--border); }
-</style>
-
 <?php sidebar('ocorrencias'); ?>
 
 <main>
@@ -225,101 +193,228 @@ $itens = db_all('SELECT i.descricao, i.dataHora, c.nome AS colaborador
     </form>
   </div>
 
-  <div class="page-head">
+  <div class="page-header">
     <div>
       <div class="proto-code">Protocolo <?= proto_num($p['numero']) ?> · aberto em <?= fmt_data_hora($p['dataRegistro']) ?></div>
       <div class="page-title">Atendimento — <?= e($p['placa']) ?></div>
       <div class="page-sub"><?= e($p['marca'] . ' ' . $p['modelo']) ?> · <?= e($p['cliente']) ?></div>
     </div>
-    <?= badge(status_protocolo($p['status'])) ?>
+    <div style="display:flex;gap:6px;flex-wrap:wrap">
+      <?= badge(status_protocolo($p['status'])) ?>
+      <?php if ($late): ?><span class="badge late">Atrasado</span><?php endif; ?>
+    </div>
   </div>
 
-  <div class="two-col">
+  <div class="two-col side-360">
 
-    <div class="card">
-      <div class="card-header">
-        <div class="card-title">Ocorrência</div>
-        <span style="font-size:12px;color:var(--muted)"><?= plural(count($itens), 'item', 'itens') ?></span>
-      </div>
+    <div class="stack">
+      <!-- OCORRÊNCIA + ITENS -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">Ocorrência</div>
+          <span class="card-meta"><?= plural(count($itens), 'item', 'itens') ?></span>
+        </div>
 
-      <div class="occ-summary">
-        <div class="info-item"><label>Componente</label><span><?= e($p['componentes'] ?: '—') ?></span></div>
-        <div class="info-item"><label>Responsável</label><span><?= e($p['responsavelNome']) ?></span></div>
-        <div class="info-item full"><label>Resumo</label><span style="font-weight:400"><?= e($p['descricao']) ?></span></div>
-      </div>
+        <div class="info-grid" style="border-bottom:1px solid var(--border)">
+          <div class="info-item"><label>Componente</label><span><?= e($p['componentes'] ?: '—') ?></span></div>
+          <div class="info-item"><label>Responsável</label><span><?= e($p['responsavelNome']) ?></span></div>
+          <div class="info-item"><label>KM de entrada</label><span><?= fmt_km($p['kmEntrada']) ?></span></div>
+          <div class="info-item"><label>Previsão de entrega</label>
+            <span<?= $late ? ' class="text-danger"' : '' ?>><?= fmt_data($p['previsaoEntrega']) ?><?= $late ? ' (atrasado)' : '' ?></span></div>
+          <div class="info-item full"><label>Resumo</label><span style="font-weight:400"><?= e($p['descricao']) ?></span></div>
+        </div>
 
-      <div class="form-body">
-        <div class="items-list" style="padding:0">
-          <?php foreach ($itens as $i => $it): ?>
-            <div class="item-view">
-              <span class="item-num"><?= str_pad((string)($i + 1), 2, '0', STR_PAD_LEFT) ?></span>
-              <div>
-                <div class="item-desc"><?= e($it['descricao']) ?></div>
-                <div class="item-meta"><?= e($it['colaborador']) ?> · <?= fmt_data_hora($it['dataHora']) ?></div>
+        <div class="form-body">
+          <div class="item-list">
+            <?php foreach ($itens as $i => $it): ?>
+              <div class="item-view">
+                <span class="item-num"><?= str_pad((string)($i + 1), 2, '0', STR_PAD_LEFT) ?></span>
+                <div>
+                  <div class="item-desc"><?= e($it['descricao']) ?></div>
+                  <div class="item-meta"><?= e($it['colaborador']) ?> · <?= fmt_data_hora($it['dataHora']) ?></div>
+                </div>
               </div>
-            </div>
-          <?php endforeach; ?>
-        </div>
+            <?php endforeach; ?>
+          </div>
 
-        <?php if ($ativo): ?>
-          <form method="POST" class="field">
-            <?= csrf_field() ?>
-            <input type="hidden" name="_action" value="item"/>
-            <input type="hidden" name="numero" value="<?= $numero ?>"/>
-            <label>Adicionar item</label>
-            <div style="display:flex;gap:8px;align-items:flex-start">
-              <textarea name="descricao" rows="2" maxlength="200" placeholder="Novo problema identificado ou serviço realizado..." required></textarea>
-              <button type="submit" class="btn-primary" style="flex-shrink:0">Adicionar</button>
-            </div>
-          </form>
-        <?php endif; ?>
+          <?php if ($ativo): ?>
+            <form method="POST" class="field">
+              <?= csrf_field() ?>
+              <input type="hidden" name="_action" value="item"/>
+              <input type="hidden" name="numero" value="<?= $numero ?>"/>
+              <label for="novo-item">Adicionar item</label>
+              <div class="inline-form">
+                <textarea id="novo-item" name="descricao" rows="2" maxlength="200" style="min-height:44px" placeholder="Novo problema identificado ou serviço realizado..." required></textarea>
+                <button type="submit" class="btn-primary">Adicionar</button>
+              </div>
+            </form>
+          <?php endif; ?>
+        </div>
       </div>
 
+      <!-- ANDAMENTO -->
       <?php if ($ativo): ?>
-        <div class="form-actions" style="justify-content:space-between">
-          <form method="POST" onsubmit="return confirm('Cancelar este atendimento? Esta ação não pode ser desfeita.')">
+      <div class="card">
+        <div class="card-header"><div class="card-title">Andamento do serviço</div></div>
+        <div class="form-body">
+          <form method="POST">
             <?= csrf_field() ?>
             <input type="hidden" name="_action" value="status"/>
             <input type="hidden" name="numero" value="<?= $numero ?>"/>
-            <button type="submit" name="status" value="CANCELADO" class="btn-danger-outline">Cancelar atendimento</button>
+            <div class="section-label">Etapa atual</div>
+            <div class="status-picker">
+              <?php foreach (ETAPAS_INTERMEDIARIAS as $etapa): $st = status_protocolo($etapa); $atual = $etapa === $p['status']; ?>
+                <button type="<?= $atual ? 'button' : 'submit' ?>" name="status" value="<?= $etapa ?>" class="status-option<?= $atual ? ' current' : '' ?>">
+                  <span class="dot <?= $st[0] ?>"></span><?= e($st[1]) ?><?= $atual ? ' <span class="text-muted" style="margin-left:auto;font-weight:400">atual</span>' : '' ?>
+                </button>
+              <?php endforeach; ?>
+            </div>
+            <div class="field-hint" style="margin-top:8px">O cliente recebe uma notificação a cada mudança de etapa.</div>
           </form>
-          <form method="POST" class="status-actions">
+
+          <form method="POST" class="field-row">
             <?= csrf_field() ?>
-            <input type="hidden" name="_action" value="status"/>
+            <input type="hidden" name="_action" value="dados"/>
             <input type="hidden" name="numero" value="<?= $numero ?>"/>
-            <?php if ($p['status'] === 'ABERTO'): ?>
-              <button type="submit" name="status" value="EM_ATENDIMENTO" class="btn-outline">Iniciar atendimento</button>
-            <?php endif; ?>
-            <button type="submit" name="status" value="FINALIZADO" class="btn-primary"
-                    onclick="return confirm('Finalizar o atendimento? O protocolo ficará imutável no histórico.')">Finalizar atendimento</button>
+            <div class="field">
+              <label for="km">KM de entrada</label>
+              <input id="km" type="text" inputmode="numeric" name="kmEntrada" value="<?= e($p['kmEntrada'] ?? '') ?>" placeholder="Ex.: 54000"/>
+            </div>
+            <div class="field">
+              <label for="previsao">Previsão de entrega</label>
+              <input id="previsao" type="date" name="previsaoEntrega" value="<?= e($p['previsaoEntrega'] ?? '') ?>"/>
+            </div>
+            <div class="full" style="display:flex;justify-content:flex-end">
+              <button type="submit" class="btn-outline btn-sm">Salvar km e previsão</button>
+            </div>
           </form>
         </div>
+        <div class="form-actions closing-actions">
+          <form method="POST">
+            <?= csrf_field() ?>
+            <input type="hidden" name="_action" value="status"/>
+            <input type="hidden" name="numero" value="<?= $numero ?>"/>
+            <button type="submit" name="status" value="CANCELADO" class="btn-danger-outline"
+                    data-confirm="Cancelar este atendimento? Esta ação não pode ser desfeita." data-confirm-title="Cancelar atendimento"
+                    data-confirm-ok="Cancelar atendimento" data-confirm-danger>Cancelar atendimento</button>
+          </form>
+          <form method="POST">
+            <?= csrf_field() ?>
+            <input type="hidden" name="_action" value="status"/>
+            <input type="hidden" name="numero" value="<?= $numero ?>"/>
+            <button type="submit" name="status" value="FINALIZADO" class="btn-primary"
+                    data-confirm="Finalizar o atendimento? O protocolo ficará imutável no histórico e o cliente poderá avaliá-lo."
+                    data-confirm-title="Finalizar atendimento" data-confirm-ok="Finalizar">Finalizar atendimento</button>
+          </form>
+        </div>
+      </div>
       <?php else: ?>
-        <div class="closed-note">
+      <div class="card">
+        <div class="closed-note" style="border-top:none">
           Atendimento <?= $p['status'] === 'FINALIZADO' ? 'finalizado' : 'cancelado' ?> em <?= fmt_data($p['dataFinalizacao']) ?>.
           Registros encerrados são imutáveis.
           <?php if ($p['status'] === 'FINALIZADO'): ?>
             <a href="../admin/historico.php?numero=<?= $numero ?>" style="color:var(--text);font-weight:500">Ver no histórico →</a>
           <?php endif; ?>
         </div>
+      </div>
       <?php endif; ?>
-    </div>
 
-    <div class="side-card">
-      <div class="card">
-        <div class="card-header"><div class="card-title">Dados do veículo</div></div>
-        <div class="info-list">
-          <div class="info-item"><label>Placa</label><span style="font-family:'DM Mono',monospace"><?= e($p['placa']) ?></span></div>
-          <div class="info-item"><label>Marca / Modelo</label><span><?= e($p['marca'] . ' ' . $p['modelo']) ?></span></div>
-          <div class="info-item"><label>Ano / Cor</label><span><?= e($p['ano'] . ' · ' . $p['cor']) ?></span></div>
+      <!-- FOTOS -->
+      <div class="card" id="fotos">
+        <div class="card-header">
+          <div class="card-title">Fotos</div>
+          <span class="card-meta"><?= plural(count($fotos), 'foto', 'fotos') ?></span>
+        </div>
+        <div class="form-body">
+          <?php if ($fotos): ?>
+            <div class="photo-grid">
+              <?php foreach ($fotos as $f): $src = '../' . PASTA_FOTOS . $f['arquivo']; ?>
+                <div class="photo">
+                  <a href="<?= e($src) ?>" data-lightbox data-caption="<?= e(($f['legenda'] ? $f['legenda'] . ' · ' : '') . fmt_data_hora($f['dataHora'])) ?>">
+                    <img src="<?= e($src) ?>" alt="<?= e($f['legenda'] ?: 'Foto do atendimento') ?>" loading="lazy"/>
+                  </a>
+                  <?php if ($f['legenda']): ?><div class="photo-caption"><?= e($f['legenda']) ?></div><?php endif; ?>
+                  <?php if ($ativo): ?>
+                    <form method="POST" data-confirm="Remover esta foto do atendimento?" data-confirm-ok="Remover" data-confirm-danger>
+                      <?= csrf_field() ?>
+                      <input type="hidden" name="_action" value="remover_foto"/>
+                      <input type="hidden" name="numero" value="<?= $numero ?>"/>
+                      <input type="hidden" name="id" value="<?= e($f['id']) ?>"/>
+                      <button type="submit" class="photo-remove" title="Remover foto" aria-label="Remover foto">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                      </button>
+                    </form>
+                  <?php endif; ?>
+                </div>
+              <?php endforeach; ?>
+            </div>
+          <?php elseif (!$ativo): ?>
+            <div class="text-muted" style="font-size:13px">Nenhuma foto registrada neste atendimento.</div>
+          <?php endif; ?>
+
+          <?php if ($ativo): ?>
+            <form method="POST" enctype="multipart/form-data" class="field-row">
+              <?= csrf_field() ?>
+              <input type="hidden" name="_action" value="foto"/>
+              <input type="hidden" name="numero" value="<?= $numero ?>"/>
+              <div class="field">
+                <label for="fotos-input">Adicionar fotos</label>
+                <input id="fotos-input" type="file" name="fotos[]" accept="image/*" multiple required/>
+                <span class="field-hint">JPG, PNG ou WEBP · até 8 MB cada. No celular, dá para tirar a foto na hora.</span>
+              </div>
+              <div class="field">
+                <label for="legenda">Legenda (opcional)</label>
+                <input id="legenda" type="text" name="legenda" maxlength="150" placeholder="Ex.: pastilha de freio desgastada"/>
+              </div>
+              <div class="full" style="display:flex;justify-content:flex-end">
+                <button type="submit" class="btn-outline btn-sm">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
+                  Enviar fotos
+                </button>
+              </div>
+            </form>
+          <?php endif; ?>
         </div>
       </div>
+    </div>
+
+    <div class="stack">
+      <div class="card">
+        <div class="card-header"><div class="card-title">Linha do tempo</div></div>
+        <?php linha_do_tempo($etapas, $p['previsaoEntrega']); ?>
+      </div>
+
+      <?php if ($p['nota']): ?>
+      <div class="card">
+        <div class="card-header"><div class="card-title">Avaliação do cliente</div><span class="card-meta"><?= fmt_data($p['dataAvaliacao']) ?></span></div>
+        <div class="rating-box">
+          <?= estrelas((int)$p['nota']) ?>
+          <?php if ($p['comentario']): ?><div class="rating-comment">“<?= e($p['comentario']) ?>”</div><?php endif; ?>
+        </div>
+      </div>
+      <?php endif; ?>
+
+      <div class="card">
+        <div class="card-header"><div class="card-title">Dados do veículo</div></div>
+        <div class="kv-list">
+          <div class="kv-row"><span class="kv-key">Placa</span><span class="kv-val mono"><?= e($p['placa']) ?></span></div>
+          <div class="kv-row"><span class="kv-key">Marca / Modelo</span><span class="kv-val"><?= e($p['marca'] . ' ' . $p['modelo']) ?></span></div>
+          <div class="kv-row"><span class="kv-key">Ano / Cor</span><span class="kv-val"><?= e($p['ano'] . ' · ' . $p['cor']) ?></span></div>
+        </div>
+      </div>
+
       <div class="card">
         <div class="card-header"><div class="card-title">Proprietário</div></div>
-        <div class="info-list">
-          <div class="info-item"><label>Nome</label><span><?= e($p['cliente']) ?></span></div>
-          <div class="info-item"><label>Telefone</label><span><?= e(fmt_tel($p['telefone'])) ?></span></div>
-          <div class="info-item"><label>E-mail</label><span><?= e($p['clienteEmail']) ?></span></div>
+        <div class="kv-list">
+          <div class="kv-row"><span class="kv-key">Nome</span><span class="kv-val"><?= e($p['cliente']) ?></span></div>
+          <div class="kv-row"><span class="kv-key">Telefone</span><span class="kv-val"><?= e(fmt_tel($p['telefone'])) ?></span></div>
+          <div class="kv-row"><span class="kv-key">E-mail</span><span class="kv-val"><?= e($p['clienteEmail']) ?></span></div>
+        </div>
+        <div class="contact-links">
+          <?php if ($tel !== ''): ?><a class="act-btn" href="tel:<?= e($tel) ?>">Ligar</a><?php endif; ?>
+          <a class="act-btn" href="mailto:<?= e($p['clienteEmail']) ?>">Enviar e-mail</a>
+          <a class="act-btn" href="../comum/protocolo.php?numero=<?= $numero ?>" target="_blank">Imprimir protocolo</a>
         </div>
       </div>
     </div>

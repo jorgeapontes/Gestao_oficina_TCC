@@ -85,7 +85,11 @@ if ($busca) {
     $where[] = '(nome LIKE ? OR cpf LIKE ? OR cargo LIKE ?)';
     array_push($params, $like, $like, $like);
 }
-$sql = 'SELECT id, nome, cpf, email, cargo, setor, perfil FROM colaborador'
+$sql = "SELECT col.id, col.nome, col.cpf, col.email, col.cargo, col.setor, col.perfil,
+               (SELECT COUNT(*) FROM protocolo p WHERE p.responsavel = col.id AND p.status IN " . SQL_ATIVOS . ") AS ativos,
+               (SELECT COUNT(*) FROM protocolo p WHERE p.responsavel = col.id AND p.status = 'FINALIZADO') AS finalizados,
+               (SELECT AVG(a.nota) FROM avaliacao a JOIN protocolo p ON p.numero = a.numeroProtocolo WHERE p.responsavel = col.id) AS media
+        FROM colaborador col"
      . ($where ? ' WHERE ' . implode(' AND ', $where) : '') . ' ORDER BY nome ASC';
 $colaboradores = db_all($sql, $params);
 $total = count($colaboradores);
@@ -95,76 +99,49 @@ $cargos  = db_all("SELECT DISTINCT cargo FROM colaborador WHERE cargo != '' ORDE
 $setores = db_all("SELECT DISTINCT setor FROM colaborador WHERE setor != '' ORDER BY setor");
 
 // Dados para edição via JS
-$collab_json = json_encode($colaboradores, JSON_HEX_QUOT | JSON_HEX_APOS | JSON_HEX_TAG);
+$collab_json = json_encode($colaboradores, JSON_HEX_QUOT | JSON_HEX_APOS | JSON_HEX_TAG | JSON_HEX_AMP);
 ?>
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-  <meta charset="UTF-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>IMM – Gerenciar Colaboradores</title>
-  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
-  <link rel="stylesheet" href="admin.css">
+  <?php head_comum('Gerenciar Colaboradores'); ?>
   <style>
-    /* ── toast ── */
-    .toast {
-      position: fixed; bottom: 1.5rem; right: 1.5rem; z-index: 9999;
-      padding: .75rem 1.25rem; border-radius: 8px; font-size: .875rem;
-      font-weight: 500; box-shadow: 0 4px 20px rgba(0,0,0,.18);
-      display: flex; align-items: center; gap: .5rem;
-      animation: slideIn .25s ease; pointer-events: none;
-    }
-    .toast.ok  { background: #1a7f4b; color: #fff; }
-    .toast.err { background: #c0392b; color: #fff; }
-    @keyframes slideIn { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:translateY(0); } }
-
-    /* ── loading state ── */
-    .collab-grid.loading { opacity: .45; pointer-events: none; transition: opacity .2s; }
-
-    /* ── empty state ── */
-    .empty-state {
-      grid-column: 1/-1; text-align: center; padding: 4rem 2rem;
-      color: var(--text-muted, #888);
-    }
-    .empty-state svg { margin-bottom: 1rem; opacity: .35; }
-    .empty-state p { font-size: .95rem; margin: 0; }
-
-    /* ── confirm overlay ── */
-    .confirm-overlay {
-      position: fixed; inset: 0; background: rgba(0,0,0,.5);
-      z-index: 2000; display: none; align-items: center; justify-content: center;
-    }
-    .confirm-overlay.open { display: flex; }
-    .confirm-box {
-      background: var(--card-bg, #1e2025); border-radius: 12px;
-      padding: 2rem; max-width: 360px; width: 90%; text-align: center;
-      box-shadow: 0 8px 40px rgba(0,0,0,.4);
-    }
-    .confirm-box h3 { margin: 0 0 .5rem; font-size: 1.1rem; }
-    .confirm-box p  { margin: 0 0 1.5rem; font-size: .875rem; opacity: .7; }
-    .confirm-actions { display: flex; gap: .75rem; justify-content: center; }
+    .collab-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
+    .collab-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; transition: border-color 0.15s; display: flex; flex-direction: column; }
+    .collab-card:hover { border-color: var(--border-strong); }
+    .collab-top { padding: 20px 20px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: flex-start; gap: 14px; }
+    .collab-avatar { width: 44px; height: 44px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 15px; font-weight: 600; flex-shrink: 0; color: #fff; }
+    .ca-blue { background: #3B5BDB; } .ca-green { background: #2D9D6E; } .ca-amber { background: #C08A00; }
+    .ca-rose { background: #C0392B; } .ca-slate { background: #5A5750; }
+    .collab-info { flex: 1; min-width: 0; }
+    .collab-name { font-size: 14.5px; font-weight: 600; margin-bottom: 2px; }
+    .collab-cargo { font-size: 12.5px; color: var(--muted); margin-bottom: 6px; }
+    .collab-meta { padding: 14px 20px; display: flex; flex-direction: column; gap: 8px; flex: 1; }
+    .collab-meta-row { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--muted); min-width: 0; }
+    .collab-meta-row svg { flex-shrink: 0; }
+    .collab-meta-val { color: var(--text); overflow-wrap: anywhere; }
+    .collab-kpis { display: grid; grid-template-columns: repeat(3, 1fr); border-top: 1px solid var(--border); }
+    .collab-kpi { padding: 10px 6px; text-align: center; border-right: 1px solid var(--border); }
+    .collab-kpi:last-child { border-right: none; }
+    .collab-kpi-val { font-size: 15px; font-weight: 600; }
+    .collab-kpi-label { font-size: 10.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; margin-top: 2px; }
+    .collab-footer { padding: 12px 20px; border-top: 1px solid var(--border); display: flex; gap: 8px; }
+    .collab-footer > * { flex: 1; }
+    .collab-grid .empty-state { grid-column: 1 / -1; }
+    @media (max-width: 760px) { .collab-grid { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>
-
 <?php sidebar('colaboradores'); ?>
 
-<!-- MAIN -->
 <main>
   <div class="topbar">
-    <form method="GET" style="display:contents">
-      <div class="search-wrap">
-        <svg class="search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
-        <input class="search-input" type="text" name="q" value="<?= e($busca) ?>" placeholder="Buscar por nome, CPF ou cargo…"/>
-      </div>
-      <!-- preserva filtros ao buscar -->
-      <?php if($filtro_cargo): ?><input type="hidden" name="cargo" value="<?= e($filtro_cargo) ?>"><?php endif; ?>
-      <?php if($filtro_setor): ?><input type="hidden" name="setor" value="<?= e($filtro_setor) ?>"><?php endif; ?>
+    <form method="GET" class="search-wrap">
+      <svg class="search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+      <input class="search-input" type="search" name="q" value="<?= e($busca) ?>" placeholder="Buscar por nome, CPF ou cargo…"/>
+      <?php if ($filtro_cargo): ?><input type="hidden" name="cargo" value="<?= e($filtro_cargo) ?>"><?php endif; ?>
+      <?php if ($filtro_setor): ?><input type="hidden" name="setor" value="<?= e($filtro_setor) ?>"><?php endif; ?>
     </form>
-    <div class="notif-btn">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 01-3.46 0"/></svg>
-      <div class="notif-dot"></div>
-    </div>
   </div>
 
   <div class="page-header">
@@ -173,76 +150,73 @@ $collab_json = json_encode($colaboradores, JSON_HEX_QUOT | JSON_HEX_APOS | JSON_
       <div class="page-sub">Cadastro, edição e remoção de colaboradores da oficina</div>
     </div>
     <button class="btn-primary" onclick="openModal('novo')">
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
       Novo colaborador
     </button>
   </div>
 
-  <!-- FILTROS -->
   <form method="GET">
-    <?php if($busca): ?><input type="hidden" name="q" value="<?= e($busca) ?>"><?php endif; ?>
+    <?php if ($busca): ?><input type="hidden" name="q" value="<?= e($busca) ?>"><?php endif; ?>
     <div class="controls-row">
-      <select class="filter-select" name="cargo" onchange="this.form.submit()">
+      <select class="filter-select" name="cargo" onchange="this.form.submit()" aria-label="Filtrar por cargo">
         <option value="">Todos os cargos</option>
         <?php foreach ($cargos as $c): ?>
-          <option value="<?= e($c['cargo']) ?>" <?= $filtro_cargo===$c['cargo']?'selected':'' ?>><?= e($c['cargo']) ?></option>
+          <option value="<?= e($c['cargo']) ?>" <?= $filtro_cargo === $c['cargo'] ? 'selected' : '' ?>><?= e($c['cargo']) ?></option>
         <?php endforeach; ?>
       </select>
-      <select class="filter-select" name="setor" onchange="this.form.submit()">
+      <select class="filter-select" name="setor" onchange="this.form.submit()" aria-label="Filtrar por setor">
         <option value="">Todos os setores</option>
         <?php foreach ($setores as $s): ?>
-          <option value="<?= e($s['setor']) ?>" <?= $filtro_setor===$s['setor']?'selected':'' ?>><?= e($s['setor']) ?></option>
+          <option value="<?= e($s['setor']) ?>" <?= $filtro_setor === $s['setor'] ? 'selected' : '' ?>><?= e($s['setor']) ?></option>
         <?php endforeach; ?>
       </select>
-      <div class="results-count"><?= $total ?> colaborador<?= $total!==1?'es':'' ?> encontrado<?= $total!==1?'s':'' ?></div>
+      <div class="results-count"><?= $total ?> colaborador<?= $total !== 1 ? 'es' : '' ?> encontrado<?= $total !== 1 ? 's' : '' ?></div>
     </div>
   </form>
 
-  <!-- GRID -->
-  <div class="collab-grid" id="collab-grid">
+  <div class="collab-grid">
     <?php if (empty($colaboradores)): ?>
-      <div class="empty-state">
-        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg>
-        <p>Nenhum colaborador encontrado.<br>Clique em <strong>Novo colaborador</strong> para começar.</p>
+      <div class="empty-state lg">
+        <div class="empty-icon">👥</div>
+        Nenhum colaborador encontrado.<br>Clique em <strong>Novo colaborador</strong> para começar.
       </div>
     <?php else: ?>
-      <?php foreach ($colaboradores as $c):
-        $ini   = initials($c['nome']);
-        $avcls = avatarColor($c['id']);
-        $cpfFmt = preg_replace('/(\d{3})(\d{3})(\d{3})(\d{2})/', '$1.$2.$3-$4', $c['cpf']);
-      ?>
+      <?php foreach ($colaboradores as $c): ?>
       <div class="collab-card">
         <div class="collab-top">
-          <div class="collab-avatar <?= e($avcls) ?>">
-            <?= e($ini) ?>
-          </div>
+          <div class="collab-avatar <?= e(avatarColor($c['id'])) ?>"><?= e(initials($c['nome'])) ?></div>
           <div class="collab-info">
             <div class="collab-name"><?= e($c['nome']) ?></div>
-            <div class="collab-cargo">
-              <?= e($c['cargo'] ?: '—') ?><?= $c['setor'] ? ' · ' . e($c['setor']) : '' ?>
-            </div>
-            <span class="badge active"><?= $c['perfil'] === 'ADMIN' ? 'Administrador' : 'Colaborador' ?></span>
+            <div class="collab-cargo"><?= e($c['cargo'] ?: '—') ?><?= $c['setor'] ? ' · ' . e($c['setor']) : '' ?></div>
+            <span class="badge <?= $c['perfil'] === 'ADMIN' ? 'admin' : 'active' ?>"><?= $c['perfil'] === 'ADMIN' ? 'Administrador' : 'Colaborador' ?></span>
           </div>
         </div>
         <div class="collab-meta">
           <div class="collab-meta-row">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M22 6l-10 7L2 6"/></svg>
             <span class="collab-meta-val"><?= e($c['email']) ?></span>
           </div>
           <div class="collab-meta-row">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
-            <span>CPF: </span>
-            <span class="collab-meta-val"><?= e($cpfFmt) ?></span>
-          </div>
-          <div class="collab-meta-row">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
-            <span>Setor: </span>
-            <span class="collab-meta-val"><?= e($c['setor'] ?: '—') ?></span>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9h4M7 13h10M7 17h6"/></svg>
+            <span>CPF:</span><span class="collab-meta-val mono"><?= e(fmt_cpf($c['cpf'])) ?></span>
           </div>
         </div>
+        <div class="collab-kpis">
+          <div class="collab-kpi"><div class="collab-kpi-val"><?= (int)$c['ativos'] ?></div><div class="collab-kpi-label">Ativos</div></div>
+          <div class="collab-kpi"><div class="collab-kpi-val"><?= (int)$c['finalizados'] ?></div><div class="collab-kpi-label">Finalizados</div></div>
+          <div class="collab-kpi"><div class="collab-kpi-val"><?= $c['media'] !== null ? number_format((float)$c['media'], 1, ',', '') . ' ★' : '—' ?></div><div class="collab-kpi-label">Avaliação</div></div>
+        </div>
         <div class="collab-footer">
-          <button class="btn-outline" onclick="openModal('editar','<?= e($c['id']) ?>')">Editar</button>
-          <button class="btn-outline danger" onclick="confirmarRemocao('<?= e($c['id']) ?>','<?= e(addslashes($c['nome'])) ?>')">Remover</button>
+          <button class="btn-outline btn-sm" onclick="openModal('editar', '<?= e($c['id']) ?>')">Editar</button>
+          <?php if ($c['id'] !== $u['id']): ?>
+          <form method="POST" data-confirm="&quot;<?= e($c['nome']) ?>&quot; será removido permanentemente. Esta ação não pode ser desfeita."
+                data-confirm-title="Remover colaborador?" data-confirm-ok="Remover" data-confirm-danger>
+            <?= csrf_field() ?>
+            <input type="hidden" name="_action" value="excluir"/>
+            <input type="hidden" name="id" value="<?= e($c['id']) ?>"/>
+            <button type="submit" class="btn-danger-outline btn-sm btn-block">Remover</button>
+          </form>
+          <?php endif; ?>
         </div>
       </div>
       <?php endforeach; ?>
@@ -250,90 +224,71 @@ $collab_json = json_encode($colaboradores, JSON_HEX_QUOT | JSON_HEX_APOS | JSON_
   </div>
 </main>
 
-<!-- ── MODAL CRIAR / EDITAR ──────────────────────────────────────────────── -->
-<div class="modal-overlay" id="modal-overlay" onclick="handleOverlayClick(event)">
-  <div class="modal">
+<!-- MODAL CRIAR / EDITAR -->
+<div class="modal-backdrop" id="modal-overlay">
+  <form class="modal" method="POST" id="collab-form">
+    <?= csrf_field() ?>
+    <input type="hidden" name="_action" id="form-action" value="criar"/>
+    <input type="hidden" name="id"      id="form-id"     value=""/>
     <div class="modal-header">
       <div class="modal-title" id="modal-title">Novo Colaborador</div>
-      <button class="modal-close" onclick="closeModal()">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
-      </button>
+      <button type="button" class="modal-close" data-close-modal aria-label="Fechar">×</button>
     </div>
-    <form method="POST" id="collab-form">
-      <?= csrf_field() ?>
-      <input type="hidden" name="_action" id="form-action" value="criar"/>
-      <input type="hidden" name="id"      id="form-id"     value=""/>
-      <div class="modal-body">
-        <div class="two-col-fields">
-          <div class="field-group" style="grid-column:1/-1">
-            <div class="field-label">Nome completo *</div>
-            <input class="field-input" type="text" name="nome" id="modal-nome" placeholder="Ex.: João da Silva" required/>
-          </div>
-          <div class="field-group">
-            <div class="field-label">CPF *</div>
-            <input class="field-input mono" type="text" name="cpf" id="modal-cpf" placeholder="000.000.000-00" required/>
-          </div>
-          <div class="field-group">
-            <div class="field-label">Cargo *</div>
-            <select class="field-input" name="cargo" id="modal-cargo" style="cursor:pointer" required>
-              <option value="">Selecionar cargo</option>
-              <option>Mecânico</option>
-              <option>Eletricista</option>
-              <option>Funileiro</option>
-              <option>Administrativo</option>
-            </select>
-          </div>
-          <div class="field-group">
-            <div class="field-label">Setor</div>
-            <select class="field-input" name="setor" id="modal-setor" style="cursor:pointer" required>
-              <option value="">Selecionar setor</option>
-              <option>Mecânica Geral</option>
-              <option>Elétrica</option>
-              <option>Funilaria</option>
-              <option>Gestão</option>
-            </select>
-          </div>
-          <div class="field-group" style="grid-column:1/-1">
-            <div class="field-label">Perfil de acesso *</div>
-            <select class="field-input" name="perfil" id="modal-perfil" style="cursor:pointer">
-              <option value="COLABORADOR">Colaborador — registra ocorrências e atendimentos</option>
-              <option value="ADMIN">Administrador — acesso total, incluindo colaboradores</option>
-            </select>
-          </div>
-          <div class="field-group" style="grid-column:1/-1">
-            <div class="field-label">E-mail de acesso *</div>
-            <input class="field-input" type="email" name="email" id="modal-email" placeholder="colaborador@imm.com" required/>
-          </div>
-          <div class="field-group" style="grid-column:1/-1" id="senha-group">
-            <div class="field-label">Senha provisória *</div>
-            <input class="field-input" type="password" name="senha" id="modal-senha" placeholder="Mínimo 8 caracteres"/>
-            <div class="field-hint">O colaborador deverá alterar a senha no primeiro acesso.</div>
-          </div>
+    <div class="modal-body">
+      <div class="field">
+        <label for="modal-nome">Nome completo *</label>
+        <input type="text" name="nome" id="modal-nome" placeholder="Ex.: João da Silva" required/>
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label for="modal-cpf">CPF *</label>
+          <input class="mono" type="text" name="cpf" id="modal-cpf" placeholder="000.000.000-00" inputmode="numeric" data-mask="cpf" maxlength="14" required/>
+        </div>
+        <div class="field">
+          <label for="modal-cargo">Cargo *</label>
+          <select name="cargo" id="modal-cargo" required>
+            <option value="">Selecionar cargo</option>
+            <option>Mecânico</option>
+            <option>Eletricista</option>
+            <option>Funileiro</option>
+            <option>Administrativo</option>
+          </select>
         </div>
       </div>
-      <div class="modal-footer">
-        <button type="button" class="btn-ghost" onclick="closeModal()">Cancelar</button>
-        <button type="submit" class="btn-modal-primary" id="modal-submit">Cadastrar colaborador</button>
+      <div class="field-row">
+        <div class="field">
+          <label for="modal-setor">Setor *</label>
+          <select name="setor" id="modal-setor" required>
+            <option value="">Selecionar setor</option>
+            <option>Mecânica Geral</option>
+            <option>Elétrica</option>
+            <option>Funilaria</option>
+            <option>Gestão</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="modal-perfil">Perfil de acesso *</label>
+          <select name="perfil" id="modal-perfil">
+            <option value="COLABORADOR">Colaborador</option>
+            <option value="ADMIN">Administrador</option>
+          </select>
+        </div>
       </div>
-    </form>
-  </div>
-</div>
-
-<!-- ── CONFIRM DELETE ─────────────────────────────────────────────────────── -->
-<div class="confirm-overlay" id="confirm-overlay">
-  <div class="confirm-box">
-    <h3>Remover colaborador?</h3>
-    <p id="confirm-msg">Esta ação não pode ser desfeita.</p>
-    <div class="confirm-actions">
-      <button class="btn-ghost" onclick="closeConfirm()">Cancelar</button>
-      <form method="POST" style="display:contents">
-        <?= csrf_field() ?>
-        <input type="hidden" name="_action" value="excluir"/>
-        <input type="hidden" name="id"      id="confirm-id" value=""/>
-        <button type="submit" class="btn-modal-primary" style="background:#c0392b;border-color:#c0392b">Remover</button>
-      </form>
+      <div class="field-hint" style="margin-top:-8px">Administradores têm acesso total, incluindo colaboradores e relatórios.</div>
+      <div class="field">
+        <label for="modal-email">E-mail de acesso *</label>
+        <input type="email" name="email" id="modal-email" placeholder="colaborador@imm.com" required/>
+      </div>
+      <div class="field">
+        <label for="modal-senha" id="senha-label">Senha provisória *</label>
+        <input type="password" name="senha" id="modal-senha" placeholder="Mínimo 8 caracteres" minlength="8" autocomplete="new-password"/>
+      </div>
     </div>
-  </div>
+    <div class="modal-footer">
+      <button type="button" class="btn-outline" data-close-modal>Cancelar</button>
+      <button type="submit" class="btn-primary" id="modal-submit">Cadastrar colaborador</button>
+    </div>
+  </form>
 </div>
 
 <?php flash_html(); ?>
@@ -342,86 +297,23 @@ $collab_json = json_encode($colaboradores, JSON_HEX_QUOT | JSON_HEX_APOS | JSON_
 const COLABORADORES = <?= $collab_json ?>;
 
 function openModal(mode, id) {
-  const overlay = document.getElementById('modal-overlay');
-  const title   = document.getElementById('modal-title');
-  const submit  = document.getElementById('modal-submit');
-  const action  = document.getElementById('form-action');
-  const senhaI  = document.getElementById('modal-senha');
-  const senhaLabel = document.querySelector('#senha-group .field-label');
-
-  overlay.classList.add('open');
-
-  if (mode === 'editar' && id) {
-    const c = COLABORADORES.find(x => x.id === id);
-    if (!c) return;
-
-    title.textContent  = 'Editar Colaborador';
-    submit.textContent = 'Salvar alterações';
-    action.value       = 'editar';
-    senhaLabel.textContent = 'Nova senha (deixe em branco para manter)';
-    senhaI.required = false;
-
-    document.getElementById('form-id').value     = c.id;
-    document.getElementById('modal-nome').value  = c.nome;
-    document.getElementById('modal-cpf').value   = c.cpf.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
-    document.getElementById('modal-cargo').value = c.cargo  || '';
-    document.getElementById('modal-setor').value = c.setor  || '';
-    document.getElementById('modal-email').value = c.email;
-    document.getElementById('modal-perfil').value = c.perfil;
-    document.getElementById('modal-senha').value = '';
-  } else {
-    title.textContent  = 'Novo Colaborador';
-    submit.textContent = 'Cadastrar colaborador';
-    action.value       = 'criar';
-    senhaLabel.textContent = 'Senha provisória *';
-    senhaI.required = true;
-
-    document.getElementById('form-id').value     = '';
-    document.getElementById('modal-nome').value  = '';
-    document.getElementById('modal-cpf').value   = '';
-    document.getElementById('modal-cargo').value = '';
-    document.getElementById('modal-setor').value = '';
-    document.getElementById('modal-email').value = '';
-    document.getElementById('modal-perfil').value = 'COLABORADOR';
-    document.getElementById('modal-senha').value = '';
-  }
+  const c = mode === 'editar' ? COLABORADORES.find(x => x.id === id) : null;
+  const edit = !!c;
+  document.getElementById('modal-title').textContent  = edit ? 'Editar Colaborador' : 'Novo Colaborador';
+  document.getElementById('modal-submit').textContent = edit ? 'Salvar alterações' : 'Cadastrar colaborador';
+  document.getElementById('form-action').value        = edit ? 'editar' : 'criar';
+  document.getElementById('senha-label').textContent  = edit ? 'Nova senha (deixe em branco para manter)' : 'Senha provisória *';
+  document.getElementById('modal-senha').required     = !edit;
+  document.getElementById('form-id').value      = edit ? c.id : '';
+  document.getElementById('modal-nome').value   = edit ? c.nome : '';
+  document.getElementById('modal-cpf').value    = edit ? mascaraCpf(c.cpf) : '';
+  document.getElementById('modal-cargo').value  = edit ? (c.cargo || '') : '';
+  document.getElementById('modal-setor').value  = edit ? (c.setor || '') : '';
+  document.getElementById('modal-email').value  = edit ? c.email : '';
+  document.getElementById('modal-perfil').value = edit ? c.perfil : 'COLABORADOR';
+  document.getElementById('modal-senha').value  = '';
+  abrirModal('modal-overlay');
 }
-
-function closeModal() {
-  document.getElementById('modal-overlay').classList.remove('open');
-}
-
-function handleOverlayClick(e) {
-  if (e.target === document.getElementById('modal-overlay')) closeModal();
-}
-
-function confirmarRemocao(id, nome) {
-  document.getElementById('confirm-id').value  = id;
-  document.getElementById('confirm-msg').textContent = `"${nome}" será removido permanentemente.`;
-  document.getElementById('confirm-overlay').classList.add('open');
-}
-
-function closeConfirm() {
-  document.getElementById('confirm-overlay').classList.remove('open');
-}
-
-// Máscara CPF
-document.getElementById('modal-cpf').addEventListener('input', function() {
-  let v = this.value.replace(/\D/g,'').substring(0,11);
-  if (v.length > 9) v = v.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/,'$1.$2.$3-$4');
-  else if (v.length > 6) v = v.replace(/(\d{3})(\d{3})(\d+)/,'$1.$2.$3');
-  else if (v.length > 3) v = v.replace(/(\d{3})(\d+)/,'$1.$2');
-  this.value = v;
-});
-
-// Busca ao pressionar Enter
-document.querySelector('.search-input').addEventListener('keydown', function(e) {
-  if (e.key === 'Enter') {
-    const params = new URLSearchParams(window.location.search);
-    params.set('q', this.value);
-    window.location.search = params.toString();
-  }
-});
 </script>
 </body>
 </html>

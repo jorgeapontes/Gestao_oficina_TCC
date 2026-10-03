@@ -110,28 +110,49 @@ function tempo_relativo($d): string {
 function plural(int $n, string $sing, string $plur): string { return $n . ' ' . ($n === 1 ? $sing : $plur); }
 
 // ─── STATUS ──────────────────────────────────────────────────────────────────
+// Ciclo do protocolo: ABERTO → (etapas intermediárias) → FINALIZADO ou CANCELADO.
+// Enquanto não for finalizado/cancelado, o protocolo é considerado "ativo".
+const STATUS_ATIVOS = ['ABERTO', 'AGUARDANDO_APROVACAO', 'EM_ATENDIMENTO', 'AGUARDANDO_PECAS', 'PRONTO'];
+// Lista SQL dos status ativos, para usar em "p.status IN " . SQL_ATIVOS.
+const SQL_ATIVOS = "('ABERTO','AGUARDANDO_APROVACAO','EM_ATENDIMENTO','AGUARDANDO_PECAS','PRONTO')";
+
 // Retornam [classe do badge, rótulo].
 function status_protocolo(?string $s): array {
     return match ($s) {
-        'ABERTO'         => ['open', 'Aberto'],
-        'EM_ATENDIMENTO' => ['prog', 'Em atendimento'],
-        'FINALIZADO'     => ['done', 'Finalizado'],
-        'CANCELADO'      => ['done', 'Cancelado'],
-        default          => ['done', '—'],
+        'ABERTO'               => ['open',   'Aberto'],
+        'AGUARDANDO_APROVACAO' => ['wait',   'Aguardando aprovação'],
+        'EM_ATENDIMENTO'       => ['prog',   'Em atendimento'],
+        'AGUARDANDO_PECAS'     => ['wait',   'Aguardando peças'],
+        'PRONTO'               => ['ready',  'Pronto p/ retirada'],
+        'FINALIZADO'           => ['done',   'Finalizado'],
+        'CANCELADO'            => ['cancel', 'Cancelado'],
+        default                => ['done',   '—'],
     };
 }
 function status_veiculo(?string $statusProtocoloAtivo): array {
     return match ($statusProtocoloAtivo) {
-        'EM_ATENDIMENTO' => ['prog', 'Em serviço'],
-        'ABERTO'         => ['open', 'Aguardando'],
-        default          => ['done', 'Sem pendências'],
+        'ABERTO'               => ['open',  'Aguardando'],
+        'AGUARDANDO_APROVACAO' => ['wait',  'Aguardando aprovação'],
+        'EM_ATENDIMENTO'       => ['prog',  'Em serviço'],
+        'AGUARDANDO_PECAS'     => ['wait',  'Aguardando peças'],
+        'PRONTO'               => ['ready', 'Pronto p/ retirada'],
+        default                => ['done',  'Sem pendências'],
     };
 }
 function badge(array $st): string { return '<span class="badge ' . e($st[0]) . '">' . e($st[1]) . '</span>'; }
 
-// Status do protocolo ativo (não finalizado/cancelado) de cada veículo: SQL reutilizável.
+// Status do protocolo ativo de cada veículo (alias "v"): SQL reutilizável.
 const SQL_STATUS_ATIVO = "(SELECT p.status FROM protocolo p WHERE p.idVeiculo = v.id
-                           AND p.status IN ('ABERTO','EM_ATENDIMENTO') ORDER BY p.numero DESC LIMIT 1)";
+                           AND p.status IN " . SQL_ATIVOS . " ORDER BY p.numero DESC LIMIT 1)";
+// Número do protocolo ativo de cada veículo (alias "v").
+const SQL_PROTOCOLO_ATIVO = "(SELECT p.numero FROM protocolo p WHERE p.idVeiculo = v.id
+                              AND p.status IN " . SQL_ATIVOS . " ORDER BY p.numero DESC LIMIT 1)";
+
+// Previsão de entrega vencida em um protocolo ainda ativo.
+function atrasado(?string $previsao, ?string $status): bool {
+    return $previsao && in_array($status, STATUS_ATIVOS, true) && $previsao < date('Y-m-d');
+}
+function fmt_km($km): string { return $km === null || $km === '' ? '—' : number_format((int)$km, 0, ',', '.') . ' km'; }
 
 // ─── REGRAS DE NEGÓCIO COMPARTILHADAS ────────────────────────────────────────
 // Retorna o id do modelo (da marca informada), criando-o se ainda não existir.
@@ -144,14 +165,110 @@ function obter_modelo(string $idMarca, string $nomeModelo): string {
     return $id;
 }
 
-// Muda o status do protocolo e mantém a ocorrência vinculada em sincronia.
-function mudar_status_protocolo(int $numero, string $novo): void {
-    $mapOcorrencia = ['ABERTO' => 'ABERTA', 'EM_ATENDIMENTO' => 'EM_ANDAMENTO',
-                      'FINALIZADO' => 'FECHADA', 'CANCELADO' => 'CANCELADA'];
+// Muda o status do protocolo, mantém a ocorrência vinculada em sincronia,
+// registra a etapa na linha do tempo e avisa o cliente.
+function mudar_status_protocolo(int $numero, string $novo, ?string $idColaborador = null): void {
+    $statusOcorrencia = match ($novo) {
+        'ABERTO'     => 'ABERTA',
+        'FINALIZADO' => 'FECHADA',
+        'CANCELADO'  => 'CANCELADA',
+        default      => 'EM_ANDAMENTO',
+    };
     $final = in_array($novo, ['FINALIZADO', 'CANCELADO'], true) ? date('Y-m-d') : null;
     db_exec('UPDATE protocolo SET status = ?, dataFinalizacao = ? WHERE numero = ?', [$novo, $final, $numero]);
     db_exec('UPDATE ocorrencia o JOIN protocolo p ON p.idOcorrencia = o.id SET o.status = ? WHERE p.numero = ?',
-            [$mapOcorrencia[$novo], $numero]);
+            [$statusOcorrencia, $numero]);
+    registrar_etapa($numero, $novo, $idColaborador);
+
+    $info = db_one('SELECT v.placa, v.idCliente FROM protocolo p JOIN veiculo v ON v.id = p.idVeiculo WHERE p.numero = ?', [$numero]);
+    if ($info) {
+        $msg = match ($novo) {
+            'AGUARDANDO_APROVACAO' => 'A oficina aguarda a sua aprovação para continuar o serviço.',
+            'EM_ATENDIMENTO'       => 'O serviço no seu veículo foi iniciado.',
+            'AGUARDANDO_PECAS'     => 'O serviço está aguardando a chegada de peças.',
+            'PRONTO'               => 'Seu veículo está pronto para retirada!',
+            'FINALIZADO'           => 'Atendimento concluído. Conte para nós como foi: avalie o atendimento.',
+            'CANCELADO'            => 'O atendimento foi cancelado.',
+            default                => 'O status do atendimento foi atualizado.',
+        };
+        $link = $novo === 'FINALIZADO' ? 'cliente/historico.php?numero=' . $numero . '#p' . $numero
+                                       : 'cliente/visualizar_ocorrencias.php?numero=' . $numero;
+        notificar_cliente($info['idCliente'], $info['placa'] . ' · ' . status_protocolo($novo)[1], $msg, $link);
+    }
+}
+
+// Registra uma etapa na linha do tempo do protocolo.
+function registrar_etapa(int $numero, string $status, ?string $idColaborador = null): void {
+    db_exec('INSERT INTO protocolo_status (numeroProtocolo, status, idColaborador) VALUES (?,?,?)',
+            [$numero, $status, $idColaborador]);
+}
+
+// Etapas registradas de um protocolo, em ordem cronológica.
+function etapas_protocolo(int $numero): array {
+    return db_all('SELECT s.status, s.dataHora, c.nome AS colaborador
+                   FROM protocolo_status s LEFT JOIN colaborador c ON c.id = s.idColaborador
+                   WHERE s.numeroProtocolo = ? ORDER BY s.dataHora, s.id', [$numero]);
+}
+
+// ─── NOTIFICAÇÕES ────────────────────────────────────────────────────────────
+// O link é gravado a partir da raiz do projeto (ex.: "cliente/historico.php").
+function notificar_cliente(string $idCliente, string $titulo, string $mensagem, ?string $link = null): void {
+    db_exec('INSERT INTO notificacao (idCliente, titulo, mensagem, link) VALUES (?,?,?,?)',
+            [$idCliente, mb_substr($titulo, 0, 100), mb_substr($mensagem, 0, 255), $link]);
+}
+function notificar_colaborador(string $idColaborador, string $titulo, string $mensagem, ?string $link = null): void {
+    db_exec('INSERT INTO notificacao (idColaborador, titulo, mensagem, link) VALUES (?,?,?,?)',
+            [$idColaborador, mb_substr($titulo, 0, 100), mb_substr($mensagem, 0, 255), $link]);
+}
+// Avisa todos os administradores (exceto quem estiver em $exceto, para não duplicar).
+function notificar_admins(string $titulo, string $mensagem, ?string $link = null, array $exceto = []): void {
+    foreach (db_all("SELECT id FROM colaborador WHERE perfil = 'ADMIN'") as $a) {
+        if (!in_array($a['id'], $exceto, true)) notificar_colaborador($a['id'], $titulo, $mensagem, $link);
+    }
+}
+// Coluna de destinatário conforme o perfil do usuário logado.
+function coluna_notificacao(array $u): string { return $u['perfil'] === 'CLIENTE' ? 'idCliente' : 'idColaborador'; }
+function notificacoes_usuario(array $u, int $limite = 12): array {
+    return db_all('SELECT id, titulo, mensagem, link, lida, dataHora FROM notificacao
+                   WHERE ' . coluna_notificacao($u) . " = ? ORDER BY id DESC LIMIT $limite", [$u['id']]);
+}
+function notificacoes_nao_lidas(array $u): int {
+    return (int)db_val('SELECT COUNT(*) FROM notificacao WHERE ' . coluna_notificacao($u) . ' = ? AND lida = 0', [$u['id']]);
+}
+
+// ─── REVISÃO PREVENTIVA ──────────────────────────────────────────────────────
+// Veículos sem atendimento ativo cujo último serviço finalizado foi há mais de
+// MESES_REVISAO meses. Com $idCliente, restringe aos veículos daquele cliente.
+const MESES_REVISAO = 6;
+function veiculos_para_revisao(?string $idCliente = null, int $limite = 20): array {
+    $params = [];
+    $filtro = '';
+    if ($idCliente !== null) { $filtro = ' AND v.idCliente = ?'; $params[] = $idCliente; }
+    $params[] = MESES_REVISAO;
+    return db_all("SELECT v.id, v.placa, mo.nome AS modelo, ma.nome AS marca, c.nome AS cliente, c.telefone,
+                          MAX(p.dataFinalizacao) AS ultimo
+                   FROM veiculo v
+                   JOIN modelo mo   ON mo.id = v.idModelo
+                   JOIN marca ma    ON ma.id = mo.idMarca
+                   JOIN cliente c   ON c.id = v.idCliente
+                   JOIN protocolo p ON p.idVeiculo = v.id AND p.status = 'FINALIZADO'
+                   WHERE NOT EXISTS (SELECT 1 FROM protocolo a WHERE a.idVeiculo = v.id AND a.status IN " . SQL_ATIVOS . ")$filtro
+                   GROUP BY v.id, v.placa, mo.nome, ma.nome, c.nome, c.telefone
+                   HAVING ultimo < CURDATE() - INTERVAL ? MONTH
+                   ORDER BY ultimo LIMIT $limite", $params);
+}
+function meses_desde(string $data): int {
+    $d = (new DateTime($data))->diff(new DateTime('today'));
+    return $d->y * 12 + $d->m;
+}
+
+// ─── FOTOS ───────────────────────────────────────────────────────────────────
+const PASTA_FOTOS = 'uploads/fotos/';          // a partir da raiz do projeto
+const TAMANHO_MAX_FOTO = 8 * 1024 * 1024;      // 8 MB por arquivo
+function fotos_protocolo(int $numero): array {
+    return db_all('SELECT f.id, f.arquivo, f.legenda, f.dataHora, c.nome AS colaborador
+                   FROM foto f LEFT JOIN colaborador c ON c.id = f.idColaborador
+                   WHERE f.numeroProtocolo = ? ORDER BY f.dataHora, f.id', [$numero]);
 }
 
 // ─── REQUISIÇÃO / FLASH / CSRF ───────────────────────────────────────────────

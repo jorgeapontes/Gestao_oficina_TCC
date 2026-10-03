@@ -4,3 +4,6 @@ package.json
 conexao.php
 .claude/settings.local.json
 .claude
+# Fotos enviadas pelos usuários
+uploads/fotos/*
+!uploads/fotos/.gitkeep
