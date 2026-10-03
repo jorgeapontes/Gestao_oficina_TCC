@@ -7,3 +7,8 @@ conexao.php
 # Fotos enviadas pelos usuários
 uploads/fotos/*
 !uploads/fotos/.gitkeep
+
+# Configuração local, logs e arquivos temporários
+*.log
+*.bak
+.env

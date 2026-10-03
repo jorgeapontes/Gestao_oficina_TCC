@@ -1,8 +1,8 @@
 <?php
 // ─── BOOTSTRAP COMUM A TODAS AS PÁGINAS ──────────────────────────────────────
-// Sessão, conexão, autenticação e funções utilitárias.
-session_start();
+// Conexão, segurança (cabeçalhos, sessão, limites), autenticação e utilitários.
 require __DIR__ . '/db.php';
+require __DIR__ . '/seguranca.php';
 require __DIR__ . '/layout.php';
 date_default_timezone_set('America/Sao_Paulo');
 
@@ -38,7 +38,10 @@ function erro_db(mysqli_sql_exception $ex): string {
         return 'Registro duplicado.';
     }
     if ($ex->getCode() === 1451) return 'Não é possível remover: existem registros vinculados.';
-    return 'Erro no banco de dados: ' . $ex->getMessage();
+    if ($ex->getCode() === 1406) return 'Um dos campos excede o tamanho permitido.';
+    // Detalhes técnicos (tabelas, colunas, SQL) ficam só no log do servidor.
+    error_log('[IMM] Erro de banco: ' . $ex->getMessage());
+    return 'Não foi possível salvar os dados. Verifique as informações e tente novamente.';
 }
 
 // ─── HELPERS DE TEXTO / FORMATAÇÃO ───────────────────────────────────────────
@@ -265,6 +268,20 @@ function meses_desde(string $data): int {
 // ─── FOTOS ───────────────────────────────────────────────────────────────────
 const PASTA_FOTOS = 'uploads/fotos/';          // a partir da raiz do projeto
 const TAMANHO_MAX_FOTO = 8 * 1024 * 1024;      // 8 MB por arquivo
+const MAX_FOTOS_POR_ENVIO = 10;
+// As fotos não são servidas direto da pasta: passam por comum/foto.php, que confere a permissão.
+function foto_url(string $arquivo, string $raiz = '../'): string {
+    return $raiz . 'comum/foto.php?f=' . rawurlencode($arquivo);
+}
+// Arquivos de foto dos veículos que atendem ao filtro (alias "v"). Usado antes de
+// excluir cliente/veículo: os registros saem pelo CASCADE, mas os arquivos ficariam no disco.
+function arquivos_fotos(string $filtro, array $params): array {
+    return array_column(db_all("SELECT f.arquivo FROM foto f JOIN protocolo p ON p.numero = f.numeroProtocolo
+                                JOIN veiculo v ON v.id = p.idVeiculo WHERE $filtro", $params), 'arquivo');
+}
+function apagar_arquivos_fotos(array $arquivos): void {
+    foreach ($arquivos as $a) @unlink(__DIR__ . '/../' . PASTA_FOTOS . basename($a));
+}
 function fotos_protocolo(int $numero): array {
     return db_all('SELECT f.id, f.arquivo, f.legenda, f.dataHora, c.nome AS colaborador
                    FROM foto f LEFT JOIN colaborador c ON c.id = f.idColaborador
@@ -274,18 +291,22 @@ function fotos_protocolo(int $numero): array {
 // ─── REQUISIÇÃO / FLASH / CSRF ───────────────────────────────────────────────
 function redirecionar(string $url): never { header('Location: ' . $url); exit; }
 function is_post(): bool { return $_SERVER['REQUEST_METHOD'] === 'POST'; }
-function post(string $k): string { return trim((string)($_POST[$k] ?? '')); }
+// Valores de formulário sempre como texto (um array enviado no lugar vira '').
+function post(string $k): string { return is_string($_POST[$k] ?? null) ? trim($_POST[$k]) : ''; }
+// Senhas: sem trim, para não alterar o que o usuário digitou.
+function post_senha(string $k): string { return is_string($_POST[$k] ?? null) ? $_POST[$k] : ''; }
+function get(string $k): string { return is_string($_GET[$k] ?? null) ? trim($_GET[$k]) : ''; }
 function acao(): string { return is_post() ? post('_action') : ''; }
 
 function flash(string $tipo, string $msg): void { $_SESSION['flash'] = [$tipo, $msg]; }
 
 function csrf_token(): string {
-    if (empty($_SESSION['csrf'])) $_SESSION['csrf'] = bin2hex(random_bytes(16));
+    if (empty($_SESSION['csrf'])) $_SESSION['csrf'] = bin2hex(random_bytes(32));
     return $_SESSION['csrf'];
 }
 function csrf_field(): string { return '<input type="hidden" name="_csrf" value="' . csrf_token() . '"/>'; }
 function verificar_csrf(): void {
-    if (is_post() && !hash_equals(csrf_token(), (string)($_POST['_csrf'] ?? ''))) {
+    if (is_post() && !hash_equals(csrf_token(), post('_csrf'))) {
         http_response_code(400);
         die('Requisição inválida (token expirado). Volte e tente novamente.');
     }
@@ -306,8 +327,12 @@ function home_do_perfil(string $perfil): string {
 }
 
 // Todas as páginas internas ficam um nível abaixo da raiz, por isso o "../".
+// Também revalida o usuário no banco a cada requisição e impede que páginas
+// com dados pessoais fiquem guardadas no cache do navegador.
 function exigir_login(array $perfis): array {
-    $u = usuario();
+    header('Cache-Control: no-store, max-age=0');
+    header('Pragma: no-cache');
+    $u = revalidar_usuario();
     if (!$u) redirecionar('../login.php');
     if (!in_array($u['perfil'], $perfis, true)) redirecionar('../' . home_do_perfil($u['perfil']));
     verificar_csrf();

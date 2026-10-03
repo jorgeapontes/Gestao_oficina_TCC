@@ -7,19 +7,30 @@ if (in_array(acao(), ['criar', 'editar'], true)) {
     $id       = post('id');
     $nome     = post('nome');
     $cpf      = so_digitos(post('cpf'));
-    $email    = post('email');
+    $email    = mb_strtolower(post('email'));
     $telefone = so_digitos(post('telefone'));
     $endereco = post('endereco');
-    $senha    = $_POST['senha'] ?? '';
+    $senha    = post_senha('senha');
+    $anterior = acao() === 'editar' ? db_one('SELECT id, email, cpf FROM cliente WHERE id = ?', [$id]) : null;
 
     if (!$nome || !$cpf || !$email || !$endereco || (acao() === 'criar' && $senha === '')) {
         flash('err', 'Preencha todos os campos obrigatórios.');
-    } elseif (strlen($cpf) !== 11) {
-        flash('err', 'CPF inválido: informe os 11 dígitos.');
-    } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+    } elseif (acao() === 'editar' && !$anterior) {
+        flash('err', 'Cliente não encontrado.');
+    } elseif (acao() === 'editar' && $senha !== '' && !e_admin()) {
+        // Redefinir a senha de uma conta existente dá acesso a ela: só o administrador pode.
+        flash('err', 'Somente o administrador pode redefinir a senha de um cliente.');
+    } elseif (mb_strlen($nome) > 100 || mb_strlen($endereco) > 200) {
+        flash('err', 'Nome (até 100) ou endereço (até 200 caracteres) muito longo.');
+    } elseif (strlen($cpf) !== 11 || ($cpf !== ($anterior['cpf'] ?? null) && !cpf_valido($cpf))) {
+        // CPF novo ou alterado precisa ser válido (cadastros antigos continuam editáveis).
+        flash('err', 'CPF inválido.');
+    } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL) || mb_strlen($email) > 100) {
         flash('err', 'E-mail inválido.');
-    } elseif ($senha !== '' && strlen($senha) < 8) {
-        flash('err', 'A senha deve ter ao menos 8 caracteres.');
+    } elseif ($telefone !== '' && (strlen($telefone) < 10 || strlen($telefone) > 11)) {
+        flash('err', 'Telefone inválido: informe DDD e número.');
+    } elseif ($senha !== '' && ($msg = erro_senha($senha, $email))) {
+        flash('err', $msg);
     } elseif (db_val('SELECT 1 FROM colaborador WHERE email = ?', [$email])) {
         flash('err', 'Este e-mail já pertence a um colaborador.');
     } else {
@@ -33,6 +44,13 @@ if (in_array(acao(), ['criar', 'editar'], true)) {
                         [$nome, $cpf, $email, $telefone, $endereco, $id]);
                 if ($senha !== '') {
                     db_exec('UPDATE cliente SET senha=? WHERE id=?', [password_hash($senha, PASSWORD_DEFAULT), $id]);
+                    notificar_cliente($id, 'Sua senha foi redefinida',
+                        'A oficina redefiniu a senha da sua conta. Se você não pediu isso, entre em contato imediatamente.',
+                        'cliente/perfil.php');
+                }
+                if (mb_strtolower($anterior['email']) !== $email) {
+                    notificar_cliente($id, 'Seu e-mail foi alterado',
+                        'A oficina alterou o e-mail de acesso da sua conta para ' . $email . '.', 'cliente/perfil.php');
                 }
                 flash('ok', 'Cliente atualizado.');
             }
@@ -45,7 +63,9 @@ if (in_array(acao(), ['criar', 'editar'], true)) {
 
 // Remover cliente apaga veículos, ocorrências e protocolos dele (CASCADE): só admin.
 if (acao() === 'excluir' && e_admin()) {
+    $arquivosFotos = arquivos_fotos('v.idCliente = ?', [post('id')]);
     db_exec('DELETE FROM cliente WHERE id = ?', [post('id')]);
+    apagar_arquivos_fotos($arquivosFotos);
     flash('ok', 'Cliente removido.');
     redirecionar('visualizar_clientes.php');
 }
@@ -58,7 +78,7 @@ $clientes = db_all("SELECT c.id, c.nome, c.cpf, c.email, c.telefone, c.endereco,
                            (SELECT MAX(p.dataFinalizacao) FROM protocolo p JOIN veiculo v ON v.id = p.idVeiculo
                             WHERE v.idCliente = c.id AND p.status = 'FINALIZADO') AS ultimo
                     FROM cliente c ORDER BY c.nome");
-$busca = trim($_GET['q'] ?? '');
+$busca = get('q');
 ?>
 <!DOCTYPE html>
 <html lang="pt-BR">
@@ -180,9 +200,9 @@ $busca = trim($_GET['q'] ?? '');
         <label for="f-end">Endereço *</label>
         <input type="text" name="endereco" id="f-end" maxlength="200" required/>
       </div>
-      <div class="field">
+      <div class="field" id="f-senha-field">
         <label id="f-senha-label" for="f-senha">Senha provisória *</label>
-        <input type="password" name="senha" id="f-senha" placeholder="Mínimo 8 caracteres" minlength="8" autocomplete="new-password"/>
+        <input type="password" name="senha" id="f-senha" placeholder="Mín. 8 caracteres, com letras e números" minlength="8" maxlength="72" autocomplete="new-password"/>
       </div>
     </div>
     <div class="modal-footer">
@@ -216,12 +236,15 @@ $busca = trim($_GET['q'] ?? '');
     document.getElementById('count').textContent = visible + ' cliente' + (visible !== 1 ? 's' : '');
   }
 
+  const PODE_REDEFINIR_SENHA = <?= e_admin() ? 'true' : 'false' ?>;
   function openModal(c) {
     const edit = !!c;
     document.getElementById('modal-title').textContent = edit ? 'Editar cliente' : 'Novo cliente';
     document.getElementById('f-submit').textContent    = edit ? 'Salvar alterações' : 'Cadastrar cliente';
     document.getElementById('f-senha-label').textContent = edit ? 'Nova senha (deixe em branco para manter)' : 'Senha provisória *';
     document.getElementById('f-senha').required = !edit;
+    // Só o administrador redefine a senha de um cliente já cadastrado.
+    document.getElementById('f-senha-field').hidden = edit && !PODE_REDEFINIR_SENHA;
     document.getElementById('f-action').value = edit ? 'editar' : 'criar';
     document.getElementById('f-id').value     = edit ? c.id : '';
     document.getElementById('f-nome').value   = edit ? c.nome : '';
@@ -233,7 +256,7 @@ $busca = trim($_GET['q'] ?? '');
     abrirModal('modal');
   }
 
-  <?php if ($busca !== ''): ?>filterTable(<?= json_encode($busca) ?>);<?php endif; ?>
+  <?php if ($busca !== ''): ?>filterTable(<?= json_encode($busca, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>);<?php endif; ?>
   <?php if (isset($_GET['novo'])): ?>openModal();<?php endif; ?>
 </script>
 </body>

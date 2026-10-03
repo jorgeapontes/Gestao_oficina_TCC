@@ -10,8 +10,8 @@ $periodos = [
     'ano'    => ['Este ano',         'YEAR(p.dataFinalizacao) = YEAR(CURDATE())'],
 ];
 $periodo = array_key_exists($_GET['periodo'] ?? '', $periodos) ? $_GET['periodo'] : 'todos';
-$colab   = $_GET['colab'] ?? '';
-$busca   = trim($_GET['q'] ?? '');
+$colab   = get('colab');
+$busca   = mb_substr(get('q'), 0, 100);
 
 $where  = ["p.status = 'FINALIZADO'"];
 $params = [];
@@ -44,9 +44,10 @@ if (($_GET['export'] ?? '') === 'csv') {
     fwrite($out, "\xEF\xBB\xBF"); // BOM para o Excel reconhecer UTF-8
     fputcsv($out, ['Protocolo', 'Cliente', 'Placa', 'Veículo', 'KM entrada', 'Colaborador', 'Aberto em', 'Finalizado em', 'Itens', 'Avaliação', 'Descrição'], ';');
     foreach ($rows as $r) {
-        fputcsv($out, [proto_num($r['numero']), $r['cliente'], $r['placa'], $r['marca'] . ' ' . $r['modelo'], $r['kmEntrada'],
+        // csv_seguro: textos digitados por usuários não viram fórmulas ao abrir no Excel.
+        fputcsv($out, array_map('csv_seguro', [proto_num($r['numero']), $r['cliente'], $r['placa'], $r['marca'] . ' ' . $r['modelo'], $r['kmEntrada'],
                        $r['colaborador'], fmt_data_hora($r['dataRegistro']), fmt_data($r['dataFinalizacao']),
-                       $r['itens'], $r['nota'], $r['descricao']], ';');
+                       $r['itens'], $r['nota'], $r['descricao']]), ';');
     }
     exit;
 }
@@ -262,7 +263,7 @@ function qs(array $troca): string {
         <div>
           <div class="section-label">Fotos (<?= count($fotosSel) ?>)</div>
           <div class="photo-grid">
-            <?php foreach ($fotosSel as $f): $src = '../' . PASTA_FOTOS . $f['arquivo']; ?>
+            <?php foreach ($fotosSel as $f): $src = foto_url($f['arquivo']); ?>
               <div class="photo"><a href="<?= e($src) ?>" data-lightbox data-caption="<?= e($f['legenda'] ?? '') ?>"><img src="<?= e($src) ?>" alt="<?= e($f['legenda'] ?: 'Foto') ?>" loading="lazy"/></a></div>
             <?php endforeach; ?>
           </div>

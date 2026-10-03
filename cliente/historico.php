@@ -39,7 +39,7 @@ $veiculos = db_all("SELECT v.id, v.placa, v.ano, mo.nome AS modelo, ma.nome AS m
                     WHERE v.idCliente = ? ORDER BY v.placa", [$u['id']]);
 $totalAtend = array_sum(array_column($veiculos, 'atendimentos'));
 
-$filtroV = $_GET['v'] ?? '';
+$filtroV = get('v');
 if (!in_array($filtroV, array_column($veiculos, 'id'), true)) $filtroV = '';
 
 $params = [$u['id']];
@@ -197,7 +197,7 @@ $expandido = (int)($_GET['numero'] ?? ($protocolos[0]['numero'] ?? 0));
 
           <?php if (!empty($fotos[$num])): ?>
           <div class="photo-grid">
-            <?php foreach ($fotos[$num] as $f): $src = '../' . PASTA_FOTOS . $f['arquivo']; ?>
+            <?php foreach ($fotos[$num] as $f): $src = foto_url($f['arquivo']); ?>
               <div class="photo"><a href="<?= e($src) ?>" data-lightbox data-caption="<?= e($f['legenda'] ?? '') ?>"><img src="<?= e($src) ?>" alt="<?= e($f['legenda'] ?: 'Foto do atendimento') ?>" loading="lazy"/></a></div>
             <?php endforeach; ?>
           </div>

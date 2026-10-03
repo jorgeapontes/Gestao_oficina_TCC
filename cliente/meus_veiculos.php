@@ -38,10 +38,14 @@ if (in_array(acao(), ['criar', 'editar'], true)) {
 
 if (acao() === 'excluir') {
     $id = post('id');
-    if (db_val('SELECT 1 FROM protocolo WHERE idVeiculo = ? AND status IN ' . SQL_ATIVOS, [$id])) {
+    if (!db_val('SELECT 1 FROM veiculo WHERE id = ? AND idCliente = ?', [$id, $u['id']])) {
+        flash('err', 'Veículo não encontrado.');
+    } elseif (db_val('SELECT 1 FROM protocolo WHERE idVeiculo = ? AND status IN ' . SQL_ATIVOS, [$id])) {
         flash('err', 'Este veículo possui um atendimento em andamento e não pode ser removido agora.');
     } else {
+        $arquivosFotos = arquivos_fotos('v.id = ? AND v.idCliente = ?', [$id, $u['id']]);
         db_exec('DELETE FROM veiculo WHERE id = ? AND idCliente = ?', [$id, $u['id']]);
+        apagar_arquivos_fotos($arquivosFotos);
         flash('ok', 'Veículo removido.');
     }
     redirecionar('meus_veiculos.php');

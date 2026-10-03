@@ -14,18 +14,26 @@ if (in_array(acao(), ['criar', 'editar'], true)) {
     $id     = post('id');
     $nome   = post('nome');
     $cpf    = so_digitos(post('cpf'));
-    $email  = post('email');
+    $email  = mb_strtolower(post('email'));
     $cargo  = post('cargo');
     $setor  = post('setor');
     $perfil = post('perfil') === 'ADMIN' ? 'ADMIN' : 'COLABORADOR';
-    $senha  = $_POST['senha'] ?? '';
+    $senha  = post_senha('senha');
+    $anterior = acao() === 'editar' ? db_one('SELECT id, cpf FROM colaborador WHERE id = ?', [$id]) : null;
 
     if (!$nome || !$cpf || !$email || !$cargo || !$setor || (acao() === 'criar' && $senha === '')) {
         flash('err', 'Preencha todos os campos obrigatórios.');
-    } elseif (strlen($cpf) !== 11) {
-        flash('err', 'CPF inválido: informe os 11 dígitos.');
-    } elseif ($senha !== '' && strlen($senha) < 8) {
-        flash('err', 'A senha deve ter ao menos 8 caracteres.');
+    } elseif (acao() === 'editar' && !$anterior) {
+        flash('err', 'Colaborador não encontrado.');
+    } elseif (mb_strlen($nome) > 100 || mb_strlen($cargo) > 50 || mb_strlen($setor) > 50) {
+        flash('err', 'Nome (até 100), cargo ou setor (até 50 caracteres) muito longo.');
+    } elseif (strlen($cpf) !== 11 || ($cpf !== ($anterior['cpf'] ?? null) && !cpf_valido($cpf))) {
+        // CPF novo ou alterado precisa ser válido (cadastros antigos continuam editáveis).
+        flash('err', 'CPF inválido.');
+    } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL) || mb_strlen($email) > 100) {
+        flash('err', 'E-mail inválido.');
+    } elseif ($senha !== '' && ($msg = erro_senha($senha, $email))) {
+        flash('err', $msg);
     } elseif (db_val('SELECT 1 FROM cliente WHERE email = ?', [$email])) {
         flash('err', 'Este e-mail já pertence a um cliente.');
     } elseif (acao() === 'editar' && $id === $u['id'] && $perfil !== 'ADMIN') {
@@ -40,8 +48,12 @@ if (in_array(acao(), ['criar', 'editar'], true)) {
                 db_exec('UPDATE colaborador SET nome=?,cpf=?,email=?,cargo=?,setor=?,perfil=? WHERE id=?',
                         [$nome, $cpf, $email, $cargo, $setor, $perfil, $id]);
                 // Atualiza senha apenas se foi informada
+                // Trocar a senha encerra as sessões abertas daquele colaborador
+                // (exceto a do próprio administrador que está fazendo a troca).
                 if ($senha !== '') {
-                    db_exec('UPDATE colaborador SET senha=? WHERE id=?', [password_hash($senha, PASSWORD_DEFAULT), $id]);
+                    $hash = password_hash($senha, PASSWORD_DEFAULT);
+                    db_exec('UPDATE colaborador SET senha=? WHERE id=?', [$hash, $id]);
+                    if ($id === $u['id']) atualizar_digital_senha($hash);
                 }
                 if ($id === $u['id']) $_SESSION['user']['nome'] = $nome;
                 flash('ok', 'Colaborador atualizado com sucesso!');
@@ -72,9 +84,9 @@ if (acao() === 'excluir') {
 }
 
 // ─── LEITURA + FILTROS ───────────────────────────────────────────────────────
-$filtro_cargo  = $_GET['cargo']  ?? '';
-$filtro_setor  = $_GET['setor']  ?? '';
-$busca         = trim($_GET['q'] ?? '');
+$filtro_cargo  = get('cargo');
+$filtro_setor  = get('setor');
+$busca         = get('q');
 
 $where = [];
 $params = [];
@@ -281,7 +293,7 @@ $collab_json = json_encode($colaboradores, JSON_HEX_QUOT | JSON_HEX_APOS | JSON_
       </div>
       <div class="field">
         <label for="modal-senha" id="senha-label">Senha provisória *</label>
-        <input type="password" name="senha" id="modal-senha" placeholder="Mínimo 8 caracteres" minlength="8" autocomplete="new-password"/>
+        <input type="password" name="senha" id="modal-senha" placeholder="Mín. 8 caracteres, com letras e números" minlength="8" maxlength="72" autocomplete="new-password"/>
       </div>
     </div>
     <div class="modal-footer">

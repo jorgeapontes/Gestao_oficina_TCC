@@ -100,7 +100,7 @@ $temDados = fn(string $g) => array_sum(array_merge(...array_column($graficos[$g]
 <html lang="pt-BR">
 <head>
   <?php head_comum('Relatórios'); ?>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js" integrity="sha512-CQBWl4fJHWbryGE+Pc7UAxWMUMNMWzWxF4SQo9CgkJIN1kx6djDQZjh3Y8SZ1d+6I+1zze6Z7kHXO7q3UyZAWw==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
   <style>
     /* Cores das séries (validadas para contraste e daltonismo nos dois temas). */
     :root { --series-1: #2a78d6; --series-2: #eb6834; }

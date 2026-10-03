@@ -76,7 +76,7 @@ if (acao() === 'registrar') {
 }
 
 // ─── LEITURA ─────────────────────────────────────────────────────────────────
-$placaBusca = trim($_GET['placa'] ?? '');
+$placaBusca = mb_substr(get('placa'), 0, 10);
 $veiculo    = $placaBusca !== '' ? buscar_veiculo($placaBusca) : null;
 $sucesso    = (int)($_GET['sucesso'] ?? 0);
 $podeRegistrar = $veiculo && !$veiculo['protocoloAtivo'];

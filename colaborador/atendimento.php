@@ -98,22 +98,37 @@ if (acao() === 'foto') {
     $salvas = 0;
     $erros  = [];
     $pasta  = __DIR__ . '/../' . PASTA_FOTOS;
-    if (!is_dir($pasta)) mkdir($pasta, 0775, true);
+    if (!is_dir($pasta)) mkdir($pasta, 0750, true);
+    require_once __DIR__ . '/../includes/imagem.php';
 
-    foreach ((array)($arquivos['name'] ?? []) as $i => $nome) {
-        $erro = $arquivos['error'][$i];
+    $nomes = is_array($arquivos['name'] ?? null) ? $arquivos['name'] : [];
+    if (count($nomes) > MAX_FOTOS_POR_ENVIO) {
+        flash('err', 'Envie no máximo ' . MAX_FOTOS_POR_ENVIO . ' fotos por vez.');
+        redirecionar($self . '#fotos');
+    }
+    foreach ($nomes as $i => $nome) {
+        $nome = mb_substr((string)$nome, 0, 60);
+        $erro = $arquivos['error'][$i] ?? UPLOAD_ERR_NO_FILE;
+        $tmp  = $arquivos['tmp_name'][$i] ?? '';
         if ($erro === UPLOAD_ERR_NO_FILE) continue;
-        if ($erro !== UPLOAD_ERR_OK || $arquivos['size'][$i] > TAMANHO_MAX_FOTO) {
+        if ($erro !== UPLOAD_ERR_OK || !is_uploaded_file($tmp) || filesize($tmp) > TAMANHO_MAX_FOTO) {
             $erros[] = "$nome: arquivo muito grande ou envio interrompido";
             continue;
         }
-        $info = @getimagesize($arquivos['tmp_name'][$i]);
-        if (!$info || !isset($tipos[$info[2]])) {
+        $info = @getimagesize($tmp);
+        if (!$info || !isset($tipos[$info[2]]) || $info[0] < 1 || $info[1] < 1 || $info[0] * $info[1] > 50_000_000) {
             $erros[] = "$nome: formato não suportado (use JPG, PNG, WEBP ou GIF)";
             continue;
         }
+        // Remove localização GPS e demais metadados antes de gravar.
+        $limpo = imagem_sem_metadados((string)file_get_contents($tmp), $info[2],
+                                      $info[2] === IMAGETYPE_JPEG ? orientacao_jpeg($tmp) : null);
+        if ($limpo === null) {
+            $erros[] = "$nome: não foi possível processar a imagem";
+            continue;
+        }
         $arquivo = uuid() . '.' . $tipos[$info[2]];
-        if (move_uploaded_file($arquivos['tmp_name'][$i], $pasta . $arquivo)) {
+        if (file_put_contents($pasta . $arquivo, $limpo, LOCK_EX) !== false) {
             db_exec('INSERT INTO foto (id, numeroProtocolo, arquivo, legenda, idColaborador) VALUES (?,?,?,?,?)',
                     [uuid(), $numero, $arquivo, $legenda !== '' ? $legenda : null, $u['id']]);
             $salvas++;
@@ -134,7 +149,7 @@ if (acao() === 'remover_foto') {
     $foto = db_one('SELECT id, arquivo FROM foto WHERE id = ? AND numeroProtocolo = ?', [post('id'), $numero]);
     if ($foto) {
         db_exec('DELETE FROM foto WHERE id = ?', [$foto['id']]);
-        @unlink(__DIR__ . '/../' . PASTA_FOTOS . $foto['arquivo']);
+        apagar_arquivos_fotos([$foto['arquivo']]);
         flash('ok', 'Foto removida.');
     }
     redirecionar($self . '#fotos');
@@ -329,7 +344,7 @@ $tel    = so_digitos($p['telefone']);
         <div class="form-body">
           <?php if ($fotos): ?>
             <div class="photo-grid">
-              <?php foreach ($fotos as $f): $src = '../' . PASTA_FOTOS . $f['arquivo']; ?>
+              <?php foreach ($fotos as $f): $src = foto_url($f['arquivo']); ?>
                 <div class="photo">
                   <a href="<?= e($src) ?>" data-lightbox data-caption="<?= e(($f['legenda'] ? $f['legenda'] . ' · ' : '') . fmt_data_hora($f['dataHora'])) ?>">
                     <img src="<?= e($src) ?>" alt="<?= e($f['legenda'] ?: 'Foto do atendimento') ?>" loading="lazy"/>

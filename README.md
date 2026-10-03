@@ -16,18 +16,29 @@ celular (layout responsivo), com modo claro e escuro.
    ```
    C:\xampp\mysql\bin\mysql.exe -uroot < database\migracao_v2.sql
    ```
+   Depois rode também `database/migracao_v3_seguranca.sql` (tabela do limite de tentativas de login;
+   se esquecer, o sistema cria a tabela sozinho no primeiro login).
 3. Sirva o projeto de uma destas formas:
    - copie/clone a pasta para `C:\xampp\htdocs\Gestao_oficina_TCC`, inicie o **Apache** e acesse
      `http://localhost/Gestao_oficina_TCC/`; **ou**
-   - na pasta do projeto, rode `C:\xampp\php\php.exe -S localhost:8080` e acesse `http://localhost:8080/`.
+   - na pasta do projeto, rode `C:\xampp\php\php.exe -S localhost:8080 router.php` e acesse `http://localhost:8080/`.
+     O `router.php` é obrigatório nesse modo: o servidor embutido ignora os `.htaccess` e, sem ele,
+     o dump do banco, os arquivos de `includes/` e as fotos ficariam acessíveis pela URL.
    - Para abrir no celular, use o IP do computador na mesma rede Wi-Fi (ex.: `http://192.168.0.10/Gestao_oficina_TCC/`).
 
 A conexão usa o padrão do XAMPP (`root` sem senha). Para outras credenciais, crie
 `includes/conexao.php` (ignorado pelo git) redefinindo `$DB_HOST`, `$DB_USER`, `$DB_PASS` e `$DB_NAME`.
 
-As fotos dos atendimentos ficam em `uploads/fotos/` (fora do git; o `.htaccess` impede a execução de scripts ali).
+As fotos dos atendimentos ficam em `uploads/fotos/` (fora do git). A pasta não é acessível pela URL: as fotos
+são entregues por `comum/foto.php`, que confere se o usuário logado pode vê-las.
+
+Erros técnicos não aparecem na tela (vão para o log do PHP). Para vê-los durante o desenvolvimento,
+defina `$DEBUG = true;` em `includes/conexao.php`.
 
 ## Usuários de teste
+
+> **Atenção:** estas contas e senhas são públicas (estão neste README e em `CREDENCIAIS.txt`).
+> Antes de colocar o sistema no ar, troque as senhas ou remova essas contas.
 
 | Perfil        | E-mail                | Senha        |
 |---------------|-----------------------|--------------|
@@ -67,19 +78,45 @@ Novos clientes podem se cadastrar pela tela de login ("Criar conta").
 ## Estrutura
 
 ```
-index.php, login.php, logout.php
+index.php, login.php, logout.php, router.php (servidor embutido do PHP), .htaccess (Apache)
 assets/       css/app.css (estilos únicos de todas as telas, tema claro/escuro, responsivo)
               js/app.js (menu mobile, tema, notificações, modais e confirmações)
-includes/     conexão (db.php), sessão/autenticação/regras/helpers (app.php),
+includes/     conexão (db.php), segurança: cabeçalhos/sessão/limites/senha (seguranca.php),
+              autenticação/regras/helpers (app.php), limpeza de metadados de fotos (imagem.php),
               <head> comum, sidebar, notificações e componentes de layout (layout.php)
 admin/        dashboard, gerenciar_colaboradores, historico, relatorios
 colaborador/  dashboard, registrar_ocorrencia, atendimento, veiculos, visualizar_clientes
 cliente/      dashboard, meus_veiculos, visualizar_ocorrencias, historico, perfil
-comum/        protocolo.php (versão para impressão/PDF), notificacao.php
-database/     gestao_oficina.sql (instalação nova), migracao_v2.sql (atualização)
+comum/        protocolo.php (versão para impressão/PDF), notificacao.php, foto.php (fotos com controle de acesso)
+database/     gestao_oficina.sql (instalação nova), migracao_v2.sql e migracao_v3_seguranca.sql (atualizações)
 uploads/      fotos dos atendimentos
 ```
 
-Segurança: senhas com `password_hash`, consultas com *prepared statements*, token CSRF em todos
-os formulários, controle de acesso por perfil em cada página, isolamento dos dados de cada cliente
-e validação do tipo real das imagens enviadas.
+## Segurança
+
+- **Autenticação:** senhas com `password_hash` (bcrypt), mínimo de 8 caracteres com letras e números;
+  limite de 5 tentativas erradas por conta e 20 por IP a cada 15 minutos; mesma mensagem e mesmo
+  tempo de resposta para usuário inexistente ou senha errada; limite de cadastros por IP.
+- **Sessão:** cookie `HttpOnly` + `SameSite=Lax` (e `Secure` em HTTPS), ID regenerado no login,
+  expiração após 2 h sem uso ou 12 h no total, logout só por POST com token CSRF.
+- **Revalidação a cada página:** o usuário é recarregado do banco. Conta removida, perfil alterado
+  ou senha trocada valem na hora, e trocar a senha encerra as sessões em outros dispositivos.
+- **Autorização:** controle de acesso por perfil em cada página e isolamento dos dados de cada cliente.
+  Só o administrador redefine a senha de um cliente, e o cliente é notificado.
+  Excluir a própria conta exige a senha atual.
+- **Dados:** consultas com *prepared statements*, token CSRF em todos os formulários,
+  saída sempre escapada (`e()`), exportação CSV protegida contra injeção de fórmulas.
+- **Fotos:** tipo real validado, nome aleatório, metadados EXIF/GPS removidos antes de salvar,
+  acesso só pelo dono do veículo ou pela equipe. Os arquivos são apagados junto com o veículo ou cliente.
+- **Servidor:** cabeçalhos CSP, `X-Frame-Options`, `nosniff`, `Referrer-Policy` e `Permissions-Policy`;
+  pastas `includes/`, `database/`, `uploads/`, `.git` e arquivos `.sql/.md/.txt` bloqueados pela URL
+  (`.htaccess` no Apache, `router.php` no servidor embutido); Chart.js carregado com SRI.
+- **Erros:** detalhes técnicos só no log do servidor, nunca na tela.
+
+### Recomendações para produção
+
+1. Use **HTTPS**. O cookie de sessão passa a ser `Secure` e o HSTS é ativado automaticamente.
+2. Crie um usuário do MySQL só para o sistema, com senha forte (exemplo em `database/migracao_v3_seguranca.sql`),
+   e configure-o em `includes/conexao.php`. Nunca use `root` sem senha.
+3. Troque as senhas das contas de teste ou remova-as.
+4. Aponte a raiz do site para a pasta do projeto com `AllowOverride All`, para os `.htaccess` valerem.

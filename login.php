@@ -25,49 +25,52 @@ if (!empty($_SESSION['_auth_flash'])) {
     }
 }
 
-// ─── LOGIN ───────────────────────────────────────────────────────────────────
+/// ─── LOGIN ───────────────────────────────────────────────────────────────────
 // Procura primeiro em colaborador (perfil COLABORADOR/ADMIN), depois em cliente.
 // O usuário pode entrar tanto com e-mail quanto com CPF (CPF só existe para clientes).
+// Proteções: limite de tentativas por conta e por IP, mesma mensagem e mesmo tempo
+// de resposta para usuário inexistente ou senha errada (não revela quem tem cadastro).
 if (acao() === 'login') {
     $metodoLogin = post('login_metodo') === 'cpf' ? 'cpf' : 'email';
-    $senha       = $_POST['senha'] ?? '';
+    $senha       = post_senha('senha');
     $old['login_metodo'] = $metodoLogin;
 
     if ($metodoLogin === 'cpf') {
-        $old['login_cpf'] = post('cpf');
-        $cpfLogin = so_digitos(post('cpf'));
-
-        if ($cpfLogin === '' || $senha === '') {
-            $erroLogin = 'Preencha todos os campos.';
-        } else {
-            $u = db_one("SELECT id, nome, email, senha, '' AS cargo, 'CLIENTE' AS perfil FROM cliente WHERE cpf = ?", [$cpfLogin]);
-            if ($u && password_verify($senha, $u['senha'])) {
-                session_regenerate_id(true);
-                unset($u['senha']);
-                $_SESSION['user'] = $u;
-                redirecionar(home_do_perfil($u['perfil']));
-            }
-            $erroLogin = 'CPF ou senha incorretos. Tente novamente.';
-        }
+        $old['login_cpf'] = mb_substr(post('cpf'), 0, 20);
+        $identificador = so_digitos(post('cpf'));
     } else {
-        $email = post('email');
-        $old['login_email'] = $email;
+        $old['login_email'] = mb_substr(post('email'), 0, 100);
+        $identificador = mb_strtolower(post('email'));
+    }
+    $msgErro = $metodoLogin === 'cpf' ? 'CPF ou senha incorretos. Tente novamente.'
+                                      : 'E-mail ou senha incorretos. Tente novamente.';
 
-        if ($email === '' || $senha === '') {
-            $erroLogin = 'Preencha todos os campos.';
+    if ($identificador === '' || $senha === '') {
+        $erroLogin = 'Preencha todos os campos.';
+    } elseif (limite_excedido('login_ip', ip_cliente(), LOGIN_MAX_POR_IP, LOGIN_JANELA)
+              || limite_excedido('login_conta', $identificador, LOGIN_MAX_POR_CONTA, LOGIN_JANELA)) {
+        $erroLogin = 'Muitas tentativas de acesso. Aguarde 15 minutos e tente novamente.';
+    } else {
+        if ($metodoLogin === 'cpf') {
+            $u = db_one("SELECT id, nome, email, senha, '' AS cargo, 'CLIENTE' AS perfil FROM cliente WHERE cpf = ?", [$identificador]);
         } else {
-            $u = db_one('SELECT id, nome, email, senha, cargo, perfil FROM colaborador WHERE email = ?', [$email]);
-            if (!$u) {
-                $u = db_one("SELECT id, nome, email, senha, '' AS cargo, 'CLIENTE' AS perfil FROM cliente WHERE email = ?", [$email]);
-            }
-            if ($u && password_verify($senha, $u['senha'])) {
-                session_regenerate_id(true);
-                unset($u['senha']);
-                $_SESSION['user'] = $u;
-                redirecionar(home_do_perfil($u['perfil']));
-            }
-            $erroLogin = 'E-mail ou senha incorretos. Tente novamente.';
+            $u = db_one('SELECT id, nome, email, senha, cargo, perfil FROM colaborador WHERE email = ?', [$identificador])
+              ?? db_one("SELECT id, nome, email, senha, '' AS cargo, 'CLIENTE' AS perfil FROM cliente WHERE email = ?", [$identificador]);
         }
+        if (strlen($senha) <= 1024 && conferir_senha($senha, $u)) {
+            limpar_tentativas('login_conta', $identificador);
+            // Atualiza o hash se o PHP passar a recomendar um algoritmo/custo mais forte.
+            if (password_needs_rehash($u['senha'], PASSWORD_DEFAULT)) {
+                $u['senha'] = password_hash($senha, PASSWORD_DEFAULT);
+                db_exec('UPDATE ' . ($u['perfil'] === 'CLIENTE' ? 'cliente' : 'colaborador') . ' SET senha = ? WHERE id = ?',
+                        [$u['senha'], $u['id']]);
+            }
+            iniciar_sessao_usuario($u);
+            redirecionar(home_do_perfil($u['perfil']));
+        }
+        registrar_tentativa('login_ip', ip_cliente());
+        registrar_tentativa('login_conta', $identificador);
+        $erroLogin = $msgErro;
     }
 
     if ($erroLogin !== '') {
@@ -76,37 +79,20 @@ if (acao() === 'login') {
     }
 }
 
-// Valida CPF pelo algoritmo oficial dos dígitos verificadores (módulo 11),
-// rejeitando também sequências de dígitos repetidos (ex.: 000.000.000-00).
-if (!function_exists('cpf_valido')) {
-    function cpf_valido(string $cpf): bool {
-        $cpf = preg_replace('/\D/', '', $cpf);
-        if (strlen($cpf) !== 11) return false;
-        if (preg_match('/^(\d)\1{10}$/', $cpf)) return false;
-        for ($t = 9; $t <= 10; $t++) {
-            $soma = 0;
-            for ($i = 0; $i < $t; $i++) {
-                $soma += (int)$cpf[$i] * (($t + 1) - $i);
-            }
-            $digito = (($soma * 10) % 11) % 10;
-            if ((int)$cpf[$t] !== $digito) return false;
-        }
-        return true;
-    }
-}
-
 // ─── CADASTRO DE CLIENTE ─────────────────────────────────────────────────────
 if (acao() === 'cadastro') {
     $aba = 'register';
     $old = [
-        'nome' => post('nome'), 'cpf' => post('cpf'), 'email' => post('email'),
+        'nome' => post('nome'), 'cpf' => post('cpf'), 'email' => mb_strtolower(post('email')),
         'telefone' => post('telefone'),
         'cep' => post('cep'), 'rua' => post('rua'), 'numero' => post('numero'),
         'complemento' => post('complemento'), 'bairro' => post('bairro'), 'cidade' => post('cidade'),
     ];
+    // Limita o tamanho do que volta para o formulário em caso de erro.
+    $old = array_map(fn($v) => mb_substr($v, 0, 200), $old);
     $cpf = so_digitos($old['cpf']);
     $cep = so_digitos($old['cep']);
-    $senha = $_POST['senha'] ?? '';
+    $senha = post_senha('senha');
 
     // Endereço completo é montado em uma única string para a coluna "endereco".
     $cepFormatado = strlen($cep) === 8 ? substr($cep, 0, 5) . '-' . substr($cep, 5) : $old['cep'];
@@ -118,33 +104,43 @@ if (acao() === 'cadastro') {
         $cepFormatado,
     ], fn($parte) => $parte !== '');
     $endereco = implode(' - ', $enderecoPartes);
+    $telefone = so_digitos($old['telefone']);
 
     if (!$old['nome'] || !$cpf || !$old['email'] || !$old['telefone'] || $senha === ''
         || !$cep || !$old['rua'] || !$old['numero'] || !$old['bairro'] || !$old['cidade']) {
         $erroCad = 'Preencha todos os campos obrigatórios.';
+    } elseif (limite_excedido('cadastro_ip', ip_cliente(), CADASTRO_MAX_POR_IP, CADASTRO_JANELA)) {
+        $erroCad = 'Muitos cadastros feitos a partir desta rede. Tente novamente mais tarde.';
+    } elseif (mb_strlen($old['nome']) > 100) {
+        $erroCad = 'O nome deve ter no máximo 100 caracteres.';
     } elseif (!cpf_valido($cpf)) {
         $erroCad = 'CPF inválido';
-    } elseif (!filter_var($old['email'], FILTER_VALIDATE_EMAIL)) {
+    } elseif (!filter_var($old['email'], FILTER_VALIDATE_EMAIL) || mb_strlen($old['email']) > 100) {
         $erroCad = 'E-mail inválido.';
+    } elseif (strlen($telefone) < 10 || strlen($telefone) > 11) {
+        $erroCad = 'Telefone inválido: informe DDD e número.';
     } elseif (strlen($cep) !== 8) {
         $erroCad = 'CEP inválido: informe os 8 dígitos.';
-    } elseif ($senha !== ($_POST['senha2'] ?? '')) {
+    } elseif (mb_strlen($endereco) > 200) {
+        $erroCad = 'Endereço muito longo (máximo de 200 caracteres).';
+    } elseif ($senha !== post_senha('senha2')) {
         $erroCad = 'As senhas não conferem.';
-    } elseif (strlen($senha) < 8) {
-        $erroCad = 'A senha deve ter ao menos 8 caracteres.';
+    } elseif ($msg = erro_senha($senha, $old['email'])) {
+        $erroCad = $msg;
     } elseif (db_val('SELECT 1 FROM colaborador WHERE email = ?', [$old['email']])) {
         $erroCad = 'Já existe um cadastro com este e-mail.';
     } else {
         try {
             $id = uuid();
+            $hash = password_hash($senha, PASSWORD_DEFAULT);
             db_exec('INSERT INTO cliente (id, nome, cpf, email, senha, telefone, endereco) VALUES (?,?,?,?,?,?,?)', [
-                $id, $old['nome'], $cpf, $old['email'], password_hash($senha, PASSWORD_DEFAULT),
-                so_digitos($old['telefone']), $endereco,
+                $id, $old['nome'], $cpf, $old['email'], $hash, $telefone, $endereco,
             ]);
+            registrar_tentativa('cadastro_ip', ip_cliente());
             notificar_admins('Novo cliente cadastrado', $old['nome'] . ' criou uma conta pelo site.',
                              'colaborador/visualizar_clientes.php?q=' . urlencode($old['nome']));
-            session_regenerate_id(true);
-            $_SESSION['user'] = ['id' => $id, 'nome' => $old['nome'], 'email' => $old['email'], 'cargo' => '', 'perfil' => 'CLIENTE'];
+            iniciar_sessao_usuario(['id' => $id, 'nome' => $old['nome'], 'email' => $old['email'],
+                                    'senha' => $hash, 'cargo' => '', 'perfil' => 'CLIENTE']);
             flash('ok', 'Cadastro realizado com sucesso! Bem-vindo(a).');
             redirecionar('cliente/dashboard.php');
         } catch (mysqli_sql_exception $ex) {
@@ -716,11 +712,11 @@ if (acao() === 'cadastro') {
       <div class="field-row">
         <div class="field">
           <label>Senha</label>
-          <input type="password" name="senha" placeholder="Mín. 8 caracteres" minlength="8" required/>
+          <input type="password" name="senha" placeholder="Mín. 8 caracteres, com letras e números" minlength="8" maxlength="72" required/>
         </div>
         <div class="field">
           <label>Confirmar senha</label>
-          <input type="password" name="senha2" placeholder="Repita a senha" minlength="8" required/>
+          <input type="password" name="senha2" placeholder="Repita a senha" minlength="8" maxlength="72" required/>
         </div>
       </div>
 

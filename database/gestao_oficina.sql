@@ -354,6 +354,19 @@ CREATE TABLE `notificacao` (
   CONSTRAINT `notificacao_ibfk_1` FOREIGN KEY (`idCliente`) REFERENCES `cliente` (`id`) ON DELETE CASCADE,
   CONSTRAINT `notificacao_ibfk_2` FOREIGN KEY (`idColaborador`) REFERENCES `colaborador` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+-- Tentativas de login/cadastro (limite contra força bruta). A chave é o hash
+-- SHA-256 do IP, e-mail ou CPF: o dado em si não fica gravado.
+--
+CREATE TABLE `tentativa_login` (
+  `id` bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+  `tipo` varchar(20) NOT NULL,
+  `chave` char(64) NOT NULL,
+  `dataHora` datetime NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`),
+  KEY `idx_tentativa` (`tipo`, `chave`, `dataHora`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 COMMIT;
 
 /*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;

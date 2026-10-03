@@ -1,8 +1,10 @@
-# Fotos enviadas: nunca executar scripts nesta pasta.
-<FilesMatch "\.(php|phtml|phar|php\d|pl|py|cgi|sh)$">
-    Require all denied
-</FilesMatch>
+# Fotos enviadas: nunca acessíveis diretamente pela URL. Elas são entregues por
+# comum/foto.php, que confere se o usuário logado pode vê-las.
+Require all denied
+Options -Indexes -ExecCGI
 <IfModule mod_php.c>
     php_flag engine off
 </IfModule>
-Options -Indexes
+<IfModule mod_php8.c>
+    php_flag engine off
+</IfModule>

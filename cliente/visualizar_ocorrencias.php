@@ -192,7 +192,7 @@ function posicao_rastreio(string $status): int {
             <div>
               <div class="section-label">Fotos do atendimento</div>
               <div class="photo-grid">
-                <?php foreach ($fotos[$num] as $f): $src = '../' . PASTA_FOTOS . $f['arquivo']; ?>
+                <?php foreach ($fotos[$num] as $f): $src = foto_url($f['arquivo']); ?>
                   <div class="photo">
                     <a href="<?= e($src) ?>" data-lightbox data-caption="<?= e($f['legenda'] ?? '') ?>"><img src="<?= e($src) ?>" alt="<?= e($f['legenda'] ?: 'Foto do atendimento') ?>" loading="lazy"/></a>
                     <?php if ($f['legenda']): ?><div class="photo-caption"><?= e($f['legenda']) ?></div><?php endif; ?>

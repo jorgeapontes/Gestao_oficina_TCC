@@ -5,14 +5,18 @@ $u = exigir_login(['CLIENTE']);
 // ─── DADOS PESSOAIS ──────────────────────────────────────────────────────────
 if (acao() === 'dados') {
     $nome     = post('nome');
-    $email    = post('email');
+    $email    = mb_strtolower(post('email'));
     $telefone = so_digitos(post('telefone'));
     $endereco = post('endereco');
 
     if (!$nome || !$email || !$endereco) {
         flash('err', 'Preencha nome, e-mail e endereço.');
-    } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+    } elseif (mb_strlen($nome) > 100 || mb_strlen($endereco) > 200) {
+        flash('err', 'Nome (até 100) ou endereço (até 200 caracteres) muito longo.');
+    } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL) || mb_strlen($email) > 100) {
         flash('err', 'E-mail inválido.');
+    } elseif ($telefone !== '' && (strlen($telefone) < 10 || strlen($telefone) > 11)) {
+        flash('err', 'Telefone inválido: informe DDD e número.');
     } elseif (db_val('SELECT 1 FROM colaborador WHERE email = ?', [$email])) {
         flash('err', 'Já existe um cadastro com este e-mail.');
     } else {
@@ -31,34 +35,53 @@ if (acao() === 'dados') {
 
 // ─── ALTERAR SENHA ───────────────────────────────────────────────────────────
 if (acao() === 'senha') {
-    $atual = $_POST['atual'] ?? '';
-    $nova  = $_POST['nova'] ?? '';
+    $atual = post_senha('atual');
+    $nova  = post_senha('nova');
     $hash  = db_val('SELECT senha FROM cliente WHERE id = ?', [$u['id']]);
 
-    if (!password_verify($atual, $hash)) {
+    if (limite_excedido('senha_atual', $u['id'], LOGIN_MAX_POR_CONTA, LOGIN_JANELA)) {
+        flash('err', 'Muitas tentativas. Aguarde 15 minutos e tente novamente.');
+    } elseif (!password_verify($atual, $hash)) {
+        registrar_tentativa('senha_atual', $u['id']);
         flash('err', 'Senha atual incorreta.');
-    } elseif (strlen($nova) < 8) {
-        flash('err', 'A nova senha deve ter ao menos 8 caracteres.');
-    } elseif ($nova !== ($_POST['confirma'] ?? '')) {
+    } elseif ($msg = erro_senha($nova, $u['email'])) {
+        flash('err', $msg);
+    } elseif ($nova !== post_senha('confirma')) {
         flash('err', 'A confirmação não confere com a nova senha.');
     } else {
-        db_exec('UPDATE cliente SET senha=? WHERE id=?', [password_hash($nova, PASSWORD_DEFAULT), $u['id']]);
-        flash('ok', 'Senha atualizada com sucesso!');
+        $novoHash = password_hash($nova, PASSWORD_DEFAULT);
+        db_exec('UPDATE cliente SET senha=? WHERE id=?', [$novoHash, $u['id']]);
+        // Esta sessão continua; as abertas em outros dispositivos são encerradas.
+        atualizar_digital_senha($novoHash);
+        session_regenerate_id(true);
+        flash('ok', 'Senha atualizada com sucesso! Outros dispositivos conectados foram desconectados.');
     }
     redirecionar('perfil.php');
 }
 
 // ─── EXCLUIR CONTA (LGPD) ────────────────────────────────────────────────────
 // Remove o cliente; veículos, ocorrências e protocolos saem junto (ON DELETE CASCADE).
+// Exige a senha atual, para que alguém com acesso momentâneo ao aparelho não apague a conta.
 if (acao() === 'excluir_conta') {
+    if (limite_excedido('senha_atual', $u['id'], LOGIN_MAX_POR_CONTA, LOGIN_JANELA)) {
+        flash('err', 'Muitas tentativas. Aguarde 15 minutos e tente novamente.');
+        redirecionar('perfil.php');
+    }
+    if (!password_verify(post_senha('senha_exclusao'), (string)db_val('SELECT senha FROM cliente WHERE id = ?', [$u['id']]))) {
+        registrar_tentativa('senha_atual', $u['id']);
+        flash('err', 'Senha incorreta. A conta não foi excluída.');
+        redirecionar('perfil.php');
+    }
     if (db_val("SELECT 1 FROM protocolo p JOIN veiculo v ON v.id = p.idVeiculo
                 WHERE v.idCliente = ? AND p.status IN " . SQL_ATIVOS, [$u['id']])) {
         flash('err', 'Você possui atendimentos em andamento. Aguarde a finalização para excluir a conta.');
         redirecionar('perfil.php');
     }
+    // Apaga também os arquivos das fotos dos atendimentos (os registros saem pelo CASCADE).
+    $arquivosFotos = arquivos_fotos('v.idCliente = ?', [$u['id']]);
     db_exec('DELETE FROM cliente WHERE id = ?', [$u['id']]);
-    $_SESSION = [];
-    session_destroy();
+    apagar_arquivos_fotos($arquivosFotos);
+    encerrar_sessao();
     redirecionar('../login.php');
 }
 
@@ -305,7 +328,7 @@ $nAtendimentos = (int)db_val("SELECT COUNT(*) FROM protocolo p JOIN veiculo v ON
             <div class="field">
               <div class="field-label">Nova senha</div>
               <div class="password-field-wrap">
-                <input class="field-input" type="password" name="nova" placeholder="Mínimo 8 caracteres" minlength="8"/>
+                <input class="field-input" type="password" name="nova" placeholder="Mín. 8 caracteres, com letras e números" minlength="8" maxlength="72"/>
                 <button class="password-toggle" type="button" onclick="togglePass(this)">
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                 </button>
@@ -314,7 +337,7 @@ $nAtendimentos = (int)db_val("SELECT COUNT(*) FROM protocolo p JOIN veiculo v ON
             <div class="field">
               <div class="field-label">Confirmar nova senha</div>
               <div class="password-field-wrap">
-                <input class="field-input" type="password" name="confirma" placeholder="Repita a nova senha" minlength="8"/>
+                <input class="field-input" type="password" name="confirma" placeholder="Repita a nova senha" minlength="8" maxlength="72"/>
                 <button class="password-toggle" type="button" onclick="togglePass(this)">
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                 </button>
@@ -353,6 +376,8 @@ $nAtendimentos = (int)db_val("SELECT COUNT(*) FROM protocolo p JOIN veiculo v ON
                   data-confirm-title="Excluir minha conta" data-confirm-ok="Excluir conta" data-confirm-danger>
               <?= csrf_field() ?>
               <input type="hidden" name="_action" value="excluir_conta"/>
+              <input class="field-input" type="password" name="senha_exclusao" placeholder="Sua senha atual"
+                     autocomplete="current-password" required aria-label="Senha atual para confirmar a exclusão" style="margin-bottom:8px"/>
               <button type="submit" class="btn-danger-outline btn-sm">Excluir conta</button>
             </form>
           </div>

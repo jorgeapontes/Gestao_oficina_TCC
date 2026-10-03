@@ -40,14 +40,16 @@ if (in_array(acao(), ['criar', 'editar'], true)) {
 // Remover veículo apaga também suas ocorrências e protocolos (ON DELETE CASCADE),
 // por isso fica restrito ao administrador.
 if (acao() === 'excluir' && e_admin()) {
+    $arquivosFotos = arquivos_fotos('v.id = ?', [post('id')]);
     db_exec('DELETE FROM veiculo WHERE id = ?', [post('id')]);
+    apagar_arquivos_fotos($arquivosFotos);
     flash('ok', 'Veículo removido.');
     redirecionar('veiculos.php');
 }
 
 // ─── LEITURA ─────────────────────────────────────────────────────────────────
-$busca     = trim($_GET['q'] ?? '');
-$idCliente = $_GET['cliente'] ?? '';
+$busca     = get('q');
+$idCliente = get('cliente');
 $where = [];
 $params = [];
 if ($idCliente !== '') { $where[] = 'v.idCliente = ?'; $params[] = $idCliente; }
@@ -69,7 +71,7 @@ $clientes = db_all('SELECT id, nome, cpf FROM cliente ORDER BY nome');
 $filtroCliente = $idCliente !== '' ? db_val('SELECT nome FROM cliente WHERE id = ?', [$idCliente]) : null;
 
 $abrirNovo  = isset($_GET['novo']);
-$placaNovo  = normalizar_placa($_GET['placa'] ?? '');
+$placaNovo  = normalizar_placa(mb_substr(get('placa'), 0, 10));
 $filtros = ['all' => 'Todos', 'prog' => 'Em serviço', 'open' => 'Aguardando', 'wait' => 'Aguard. peças/aprovação', 'ready' => 'Prontos', 'done' => 'Sem pendências'];
 ?>
 <!DOCTYPE html>
@@ -259,11 +261,11 @@ $filtros = ['all' => 'Todos', 'prog' => 'Em serviço', 'open' => 'Aguardando', '
     abrirModal('modal');
   }
 
-  <?php if ($busca !== ''): ?>filterTable(<?= json_encode($busca) ?>);<?php endif; ?>
+  <?php if ($busca !== ''): ?>filterTable(<?= json_encode($busca, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>);<?php endif; ?>
   <?php if ($abrirNovo): ?>
     openModal();
-    document.getElementById('f-placa').value = <?= json_encode($placaNovo) ?>;
-    <?php if ($idCliente !== ''): ?>document.getElementById('f-cliente').value = <?= json_encode($idCliente) ?>;<?php endif; ?>
+    document.getElementById('f-placa').value = <?= json_encode($placaNovo, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
+    <?php if ($idCliente !== ''): ?>document.getElementById('f-cliente').value = <?= json_encode($idCliente, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;<?php endif; ?>
   <?php endif; ?>
 </script>
 </body>
