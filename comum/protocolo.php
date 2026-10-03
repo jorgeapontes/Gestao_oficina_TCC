@@ -34,6 +34,7 @@ $itens = db_all('SELECT i.descricao, i.dataHora, c.nome AS colaborador
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Protocolo <?= proto_num($p['numero']) ?> – IMM</title>
+  <?php favicon_tags('../'); ?>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }

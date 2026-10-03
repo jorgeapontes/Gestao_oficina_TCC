@@ -160,6 +160,7 @@ if (acao() === 'cadastro') {
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>IMM – Login</title>
+  <?php favicon_tags(''); ?>
   <script>try { const t = localStorage.getItem("imm-tema"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}</script>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
   <style>

@@ -18,6 +18,11 @@ RedirectMatch 404 (?i)/(\.git|\.claude|database|includes|uploads)(/|$)
     Require all denied
 </Files>
 
+# Tipo correto do manifesto do app (ícones da tela inicial do celular).
+<IfModule mod_mime.c>
+    AddType application/manifest+json .webmanifest
+</IfModule>
+
 # Cabeçalhos de segurança também para arquivos estáticos (CSS, JS, imagens).
 <IfModule mod_headers.c>
     Header always set X-Content-Type-Options "nosniff"

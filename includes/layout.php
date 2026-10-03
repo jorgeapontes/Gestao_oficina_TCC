@@ -65,7 +65,19 @@ function asset(string $caminho, string $raiz): string {
     return $raiz . $caminho . (is_file($arquivo) ? '?v=' . filemtime($arquivo) : '');
 }
 
-// Conteúdo comum do <head>: metas, fontes, CSS/JS do sistema e o tema salvo.
+// Ícones da aba do navegador, da tela inicial do celular e do manifesto do app.
+// $raiz é o caminho até a raiz do projeto ('' na raiz, '../' nas subpastas).
+function favicon_tags(string $raiz = '../'): void {
+    ?>
+  <link rel="icon" href="<?= e(asset('favicon.ico', $raiz)) ?>" sizes="16x16 32x32 48x48"/>
+  <link rel="icon" type="image/png" sizes="32x32" href="<?= e(asset('assets/img/favicon-32.png', $raiz)) ?>"/>
+  <link rel="icon" type="image/png" sizes="16x16" href="<?= e(asset('assets/img/favicon-16.png', $raiz)) ?>"/>
+  <link rel="apple-touch-icon" sizes="180x180" href="<?= e(asset('assets/img/apple-touch-icon.png', $raiz)) ?>"/>
+  <link rel="manifest" href="<?= e(asset('site.webmanifest', $raiz)) ?>"/>
+    <?php
+}
+
+// Conteúdo comum do <head>: metas, fontes, ícones, CSS/JS do sistema e o tema salvo.
 // O script do tema roda antes da página aparecer, evitando "piscar" no modo escuro.
 function head_comum(string $titulo, string $raiz = '../'): void {
     ?>
@@ -74,6 +86,7 @@ function head_comum(string $titulo, string $raiz = '../'): void {
   <meta name="theme-color" content="#F5F4F2" media="(prefers-color-scheme: light)"/>
   <meta name="theme-color" content="#141413" media="(prefers-color-scheme: dark)"/>
   <title>IMM – <?= e($titulo) ?></title>
+  <?php favicon_tags($raiz); ?>
   <script>
     try { const t = localStorage.getItem('imm-tema'); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
   </script>
