@@ -367,6 +367,17 @@ CREATE TABLE `tentativa_login` (
   PRIMARY KEY (`id`),
   KEY `idx_tentativa` (`tipo`, `chave`, `dataHora`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+-- Cache das respostas da Carpedia (marcas, modelos e versões). Cada recurso ocupa uma única
+-- linha, sobrescrita quando expira (sem cópias históricas).
+--
+CREATE TABLE `carpedia_cache` (
+  `caminho` varchar(190) NOT NULL,
+  `resposta` mediumtext NOT NULL,
+  `buscadoEm` datetime NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`caminho`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 COMMIT;
 
 /*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;

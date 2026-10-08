@@ -7,27 +7,24 @@ if (in_array(acao(), ['criar', 'editar'], true)) {
     $id        = post('id');
     $idCliente = post('idCliente');
     $placa     = normalizar_placa(post('placa'));
-    $idMarca   = post('idMarca');
-    $modelo    = post('modelo');
-    $ano       = (int)post('ano');
     $cor       = post('cor');
 
-    if (!$idCliente || !$placa || !$idMarca || !$modelo || !$cor || !$ano) {
+    if (!$idCliente || !$placa || !$cor) {
         flash('err', 'Preencha todos os campos.');
     } elseif (!preg_match('/^[A-Z]{3}-?\d[A-Z0-9]\d{2}$/', $placa)) {
         flash('err', 'Placa inválida. Use o formato ABC-1234 ou ABC1D23.');
-    } elseif ($ano < 1900 || $ano > (int)date('Y') + 1) {
-        flash('err', 'Ano inválido.');
     } else {
         try {
-            $idModelo = obter_modelo($idMarca, $modelo);
-            if (acao() === 'criar') {
+            $d = dados_veiculo_do_formulario();   // marca/modelo (catálogo ou digitados) e ano
+            if (isset($d['erro'])) {
+                flash('err', $d['erro']);
+            } elseif (acao() === 'criar') {
                 db_exec('INSERT INTO veiculo (id, placa, ano, cor, idModelo, idCliente) VALUES (?,?,?,?,?,?)',
-                        [uuid(), $placa, $ano, mb_substr($cor, 0, 10), $idModelo, $idCliente]);
+                        [uuid(), $placa, $d['ano'], mb_substr($cor, 0, 10), $d['idModelo'], $idCliente]);
                 flash('ok', "Veículo $placa cadastrado com sucesso!");
             } else {
                 db_exec('UPDATE veiculo SET placa=?, ano=?, cor=?, idModelo=?, idCliente=? WHERE id=?',
-                        [$placa, $ano, mb_substr($cor, 0, 10), $idModelo, $idCliente, $id]);
+                        [$placa, $d['ano'], mb_substr($cor, 0, 10), $d['idModelo'], $idCliente, $id]);
                 flash('ok', "Veículo $placa atualizado.");
             }
         } catch (mysqli_sql_exception $ex) {
@@ -191,21 +188,24 @@ $filtros = ['all' => 'Todos', 'prog' => 'Em serviço', 'open' => 'Aguardando', '
         <label for="f-placa">Placa</label>
         <input type="text" name="placa" id="f-placa" placeholder="ABC-1234" maxlength="8" style="text-transform:uppercase" data-mask="placa" required/>
       </div>
-      <div class="field-row">
-        <div class="field">
-          <label for="f-marca">Marca</label>
-          <select name="idMarca" id="f-marca" required>
-            <option value="">Selecione</option>
-            <?php foreach ($marcas as $m): ?><option value="<?= e($m['id']) ?>"><?= e($m['nome']) ?></option><?php endforeach; ?>
-          </select>
+      <?php campos_carpedia_veiculo(); ?>
+      <fieldset class="blk" id="f-manual">
+        <div class="field-row">
+          <div class="field">
+            <label for="f-marca">Marca</label>
+            <select name="idMarca" id="f-marca" required>
+              <option value="">Selecione</option>
+              <?php foreach ($marcas as $m): ?><option value="<?= e($m['id']) ?>"><?= e($m['nome']) ?></option><?php endforeach; ?>
+            </select>
+          </div>
+          <div class="field">
+            <label for="f-modelo">Modelo</label>
+            <input type="text" name="modelo" id="f-modelo" placeholder="Ex: Corolla" maxlength="100" required/>
+          </div>
         </div>
-        <div class="field">
-          <label for="f-modelo">Modelo</label>
-          <input type="text" name="modelo" id="f-modelo" placeholder="Ex: Corolla" maxlength="100" required/>
-        </div>
-      </div>
+      </fieldset>
       <div class="field-row">
-        <div class="field">
+        <div class="field" id="ano-wrap">
           <label for="f-ano">Ano</label>
           <input type="number" name="ano" id="f-ano" placeholder="2020" min="1900" max="<?= date('Y') + 1 ?>" inputmode="numeric" required/>
         </div>
@@ -224,6 +224,7 @@ $filtros = ['all' => 'Todos', 'prog' => 'Em serviço', 'open' => 'Aguardando', '
 
 <?php flash_html(); ?>
 
+<script src="<?= e(asset('assets/js/carpedia.js', '../')) ?>"></script>
 <script>
   let currentFilter = 'all';
   let searchTerm = '';
@@ -258,6 +259,7 @@ $filtros = ['all' => 'Todos', 'prog' => 'Em serviço', 'open' => 'Aguardando', '
     document.getElementById('f-modelo').value  = edit ? v.modelo : '';
     document.getElementById('f-ano').value     = edit ? v.ano : '';
     document.getElementById('f-cor').value     = edit ? v.cor : '';
+    Carpedia.abrir(edit);
     abrirModal('modal');
   }
 

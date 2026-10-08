@@ -13,11 +13,18 @@ $DB_NAME = 'gestao_oficina';
 // Deixe false fora do ambiente de desenvolvimento (pode ser redefinido em conexao.php).
 $DEBUG = false;
 
+// Chave da API da Carpedia (catálogo de marcas/modelos/versões). Fica só em includes/conexao.php
+// ($CARPEDIA_KEY = 'cpk_...'); vazia, o cadastro de veículo usa o modo manual.
+// Nunca vai para o navegador, para o log nem para mensagens de erro.
+$CARPEDIA_KEY = '';
+
 if (file_exists(__DIR__ . '/conexao.php')) {
     require __DIR__ . '/conexao.php';
 }
 
 if (!defined('MODO_DEBUG')) define('MODO_DEBUG', (bool)$DEBUG);
+if (!defined('CARPEDIA_KEY')) define('CARPEDIA_KEY', is_string($CARPEDIA_KEY) ? trim($CARPEDIA_KEY) : '');
+unset($CARPEDIA_KEY);
 
 mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
 

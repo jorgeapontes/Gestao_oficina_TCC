@@ -4,6 +4,7 @@
 require __DIR__ . '/db.php';
 require __DIR__ . '/seguranca.php';
 require __DIR__ . '/layout.php';
+require __DIR__ . '/carpedia.php';
 date_default_timezone_set('America/Sao_Paulo');
 
 // ─── CONSULTAS ───────────────────────────────────────────────────────────────
@@ -158,6 +159,15 @@ function atrasado(?string $previsao, ?string $status): bool {
 function fmt_km($km): string { return $km === null || $km === '' ? '—' : number_format((int)$km, 0, ',', '.') . ' km'; }
 
 // ─── REGRAS DE NEGÓCIO COMPARTILHADAS ────────────────────────────────────────
+// Retorna o id da marca com este nome (sem diferenciar maiúsculas), criando-a se ainda não existir.
+function obter_marca(string $nome): string {
+    $nome = mb_substr(trim($nome), 0, 100);
+    $id = db_val('SELECT id FROM marca WHERE nome = ?', [$nome]);
+    if ($id) return $id;
+    $id = uuid();
+    db_exec('INSERT INTO marca (id, nome) VALUES (?,?)', [$id, $nome]);
+    return $id;
+}
 // Retorna o id do modelo (da marca informada), criando-o se ainda não existir.
 function obter_modelo(string $idMarca, string $nomeModelo): string {
     $nomeModelo = trim($nomeModelo);

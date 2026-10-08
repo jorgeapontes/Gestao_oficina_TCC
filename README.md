@@ -11,13 +11,18 @@ celular (layout responsivo), com modo claro e escuro.
    ```
    C:\xampp\mysql\bin\mysql.exe -uroot < database\gestao_oficina.sql
    ```
-   **Já tinha o banco da versão anterior?** Não precisa recriar: rode só a migração
-   `database/migracao_v2.sql` (novos status, km/previsão, linha do tempo, avaliações, fotos e notificações):
+   O `gestao_oficina.sql` **já cria tudo** (todas as tabelas e colunas atuais). As migrações são só para
+   **bancos já instalados** antes de cada versão; numa instalação nova não precisa rodar nenhuma.
+   Rode as que faltam, em ordem. Todas podem ser repetidas sem problema:
    ```
-   C:\xampp\mysql\bin\mysql.exe -uroot < database\migracao_v2.sql
+   C:\xampp\mysql\bin\mysql.exe -uroot < database\migracao_v3_seguranca.sql
+   C:\xampp\mysql\bin\mysql.exe -uroot < database\migracao_v4_carpedia.sql
    ```
-   Depois rode também `database/migracao_v3_seguranca.sql` (tabela do limite de tentativas de login;
-   se esquecer, o sistema cria a tabela sozinho no primeiro login).
+   - `migracao_v3_seguranca.sql`: tabela do limite de tentativas de login (se esquecer, o sistema cria a
+     tabela sozinho no primeiro login).
+   - `migracao_v4_carpedia.sql`: tabela `carpedia_cache` (cache do catálogo da Carpedia). **Sem ela, o
+     catálogo não aparece** e o cadastro de veículo segue no modo manual (por segurança, sem o cache o
+     sistema não consulta a API, porque cada consulta gastaria a cota).
 3. Sirva o projeto de uma destas formas:
    - copie/clone a pasta para `C:\xampp\htdocs\Gestao_oficina_TCC`, inicie o **Apache** e acesse
      `http://localhost/Gestao_oficina_TCC/`; **ou**
@@ -28,6 +33,29 @@ celular (layout responsivo), com modo claro e escuro.
 
 A conexão usa o padrão do XAMPP (`root` sem senha). Para outras credenciais, crie
 `includes/conexao.php` (ignorado pelo git) redefinindo `$DB_HOST`, `$DB_USER`, `$DB_PASS` e `$DB_NAME`.
+
+### Marca, modelo e versão pelo catálogo da Carpedia
+
+No cadastro de veículo (cliente e colaborador), marca, modelo e versão podem ser escolhidos no catálogo da
+[Carpedia](https://www.carpedia.com.br/desenvolvedores/docs). A versão é opcional e só serve para listar os
+anos-modelo dela: o sistema grava marca, modelo e ano (sem a versão). Sem versão, o ano é digitado.
+É opcional: sem a chave (ou com a Carpedia fora do ar), o formulário usa o modo manual (marca da lista
+do sistema, modelo e ano digitados), e o botão "Informar manualmente" troca de modo a qualquer momento.
+
+1. Rode `database/migracao_v4_carpedia.sql` (bancos já instalados).
+2. Peça uma chave em <https://www.carpedia.com.br/desenvolvedores/solicitar> e coloque-a em
+   `includes/conexao.php` (ignorado pelo git; é o único lugar):
+   ```php
+   $CARPEDIA_KEY = 'cpk_...';
+   ```
+   A chave só é usada no servidor. O navegador fala apenas com `comum/carpedia.php`; ela nunca vai para
+   o HTML, o JavaScript, o log ou mensagens de erro.
+3. A cota do plano grátis é pequena (200 requisições/mês). Por isso as consultas são **sob demanda** e
+   ficam em cache na tabela `carpedia_cache` (marcas e modelos por 30 dias, versões por 90). Se a Carpedia
+   falhar (cota, chave inválida, timeout), o sistema tenta de novo só depois de 15 minutos. Nunca se varre o
+   catálogo (proibido pelos [termos](https://www.carpedia.com.br/termos)).
+4. Onde há dado da Carpedia aparece "Dados: Carpedia". Se a conta da Carpedia for encerrada, os termos
+   pedem que os dados sejam apagados: `TRUNCATE TABLE carpedia_cache;`.
 
 As fotos dos atendimentos ficam em `uploads/fotos/` (fora do git). A pasta não é acessível pela URL: as fotos
 são entregues por `comum/foto.php`, que confere se o usuário logado pode vê-las.
@@ -87,8 +115,9 @@ includes/     conexão (db.php), segurança: cabeçalhos/sessão/limites/senha (
 admin/        dashboard, gerenciar_colaboradores, historico, relatorios
 colaborador/  dashboard, registrar_ocorrencia, atendimento, veiculos, visualizar_clientes
 cliente/      dashboard, meus_veiculos, visualizar_ocorrencias, historico, perfil
-comum/        protocolo.php (versão para impressão/PDF), notificacao.php, foto.php (fotos com controle de acesso)
-database/     gestao_oficina.sql (instalação nova), migracao_v2.sql e migracao_v3_seguranca.sql (atualizações)
+comum/        protocolo.php (versão para impressão/PDF), notificacao.php, foto.php (fotos com controle de acesso),
+              carpedia.php (JSON de marcas, modelos e versões da Carpedia para o cadastro de veículo)
+database/     gestao_oficina.sql (instalação nova), migracao_v3_seguranca.sql e migracao_v4_carpedia.sql (atualizações)
 uploads/      fotos dos atendimentos
 ```
 
