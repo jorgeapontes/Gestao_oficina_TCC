@@ -994,12 +994,6 @@ tbody tr:hover .row-actions, .row-actions:focus-within { opacity: 1; }
     .stats-grid, .stats-grid.cols-3 { grid-template-columns: 1fr; }
 }
 
-/* ── 13b. CARPEDIA (marca, modelo e versão do catálogo) ────────────────────── */
-.blk { border: 0; padding: 0; margin: 0; min-width: 0; display: flex; flex-direction: column; gap: 16px; }
-.carpedia-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
-.carpedia-bar .act-btn { margin-left: auto; }
-.carpedia-credito { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
-
 /* ── 14. IMPRESSÃO ────────────────────────────────────────────────────────── */
 @media print {
     aside, .mobile-bar, .topbar, .notif-panel, .toast, .sidebar-overlay { display: none !important; }

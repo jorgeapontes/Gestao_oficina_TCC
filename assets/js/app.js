@@ -195,6 +195,29 @@ document.addEventListener('input', e => {
   if (m === 'placa') e.target.value = e.target.value.toUpperCase();
 });
 
+// ─── MARCA DO VEÍCULO (lista + "Outra marca") ────────────────────────────────
+// Escolher "Outra marca" no #f-marca mostra o campo de texto #f-marca-outra.
+function alternarMarcaOutra() {
+  const sel = $('#f-marca'), inp = $('#f-marca-outra');
+  if (!sel || !inp) return false;
+  const outra = sel.value === '__outra';
+  inp.hidden = inp.disabled = !outra;
+  inp.required = outra;
+  return outra;
+}
+// Preenche a marca ao abrir o formulário: se não estiver na lista, vai para "Outra marca".
+function preencherMarca(nome) {
+  const sel = $('#f-marca'), inp = $('#f-marca-outra');
+  if (!sel || !inp) return;
+  const naLista = !nome || Array.from(sel.options).some(o => o.value === nome);
+  sel.value = naLista ? (nome || '') : '__outra';
+  inp.value = naLista ? '' : nome;
+  alternarMarcaOutra();
+}
+document.addEventListener('change', e => {
+  if (e.target.id === 'f-marca' && alternarMarcaOutra()) $('#f-marca-outra').focus();
+});
+
 // ─── INICIALIZAÇÃO ───────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
   atualizarRotuloTema();

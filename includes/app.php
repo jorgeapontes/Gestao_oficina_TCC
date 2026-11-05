@@ -4,7 +4,6 @@
 require __DIR__ . '/db.php';
 require __DIR__ . '/seguranca.php';
 require __DIR__ . '/layout.php';
-require __DIR__ . '/carpedia.php';
 date_default_timezone_set('America/Sao_Paulo');
 
 // ─── CONSULTAS ───────────────────────────────────────────────────────────────
@@ -159,6 +158,49 @@ function atrasado(?string $previsao, ?string $status): bool {
 function fmt_km($km): string { return $km === null || $km === '' ? '—' : number_format((int)$km, 0, ',', '.') . ' km'; }
 
 // ─── REGRAS DE NEGÓCIO COMPARTILHADAS ────────────────────────────────────────
+// Marcas oferecidas no cadastro de veículo: as 10 com mais carros em circulação no Brasil.
+// Qualquer outra pode ser digitada na opção "Outra marca" (fica gravada na tabela marca).
+const MARCAS_POPULARES = ['Chevrolet', 'Fiat', 'Ford', 'Honda', 'Hyundai',
+                          'Jeep', 'Nissan', 'Renault', 'Toyota', 'Volkswagen'];
+const MARCA_OUTRA = '__outra';
+
+// Lê marca, modelo e ano do formulário de veículo (cliente e colaborador).
+// Retorna ['idModelo' => ..., 'ano' => ...] ou ['erro' => mensagem].
+function dados_veiculo_do_formulario(): array {
+    $outra  = post('marca') === MARCA_OUTRA;
+    $marca  = $outra ? post('marcaOutra') : post('marca');
+    $modelo = post('modelo');
+    $ano    = (int)post('ano');
+    if ($marca === '' || $modelo === '' || !$ano) return ['erro' => 'Preencha todos os campos.'];
+    if (!$outra && !in_array($marca, MARCAS_POPULARES, true)) return ['erro' => 'Marca inválida.'];
+    if (mb_strlen($marca) > 100)  return ['erro' => 'A marca deve ter no máximo 100 caracteres.'];
+    if (mb_strlen($modelo) > 100) return ['erro' => 'O modelo deve ter no máximo 100 caracteres.'];
+    if ($ano < 1900 || $ano > (int)date('Y') + 1) return ['erro' => 'Ano inválido.'];
+    return ['idModelo' => obter_modelo(obter_marca($marca), $modelo), 'ano' => $ano];
+}
+
+// Campos Marca (lista + "Outra marca", que abre um campo de texto) e Modelo do formulário de veículo.
+// O JavaScript que alterna o campo de texto está em assets/js/app.js (preencherMarca).
+function campos_marca_modelo_veiculo(): void {
+    ?>
+      <div class="field-row">
+        <div class="field">
+          <label for="f-marca">Marca</label>
+          <select name="marca" id="f-marca" required>
+            <option value="">Selecione</option>
+            <?php foreach (MARCAS_POPULARES as $m): ?><option value="<?= e($m) ?>"><?= e($m) ?></option><?php endforeach; ?>
+            <option value="<?= MARCA_OUTRA ?>">Outra marca (digitar)</option>
+          </select>
+          <input type="text" name="marcaOutra" id="f-marca-outra" placeholder="Digite a marca" maxlength="100"
+                 aria-label="Nome da marca" hidden disabled/>
+        </div>
+        <div class="field">
+          <label for="f-modelo">Modelo</label>
+          <input type="text" name="modelo" id="f-modelo" placeholder="Ex: Corolla" maxlength="100" required/>
+        </div>
+      </div>
+    <?php
+}
 // Retorna o id da marca com este nome (sem diferenciar maiúsculas), criando-a se ainda não existir.
 function obter_marca(string $nome): string {
     $nome = mb_substr(trim($nome), 0, 100);

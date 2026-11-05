@@ -4,34 +4,39 @@ $u = exigir_login(['COLABORADOR', 'ADMIN']);
 $me = $u['id'];
 
 // ─── ESTATÍSTICAS ────────────────────────────────────────────────────────────
-$emAberto    = (int)db_val("SELECT COUNT(*) FROM protocolo WHERE responsavel = ? AND status = 'ABERTO'", [$me]);
-$emAndamento = (int)db_val("SELECT COUNT(*) FROM protocolo WHERE responsavel = ? AND status IN " . SQL_ATIVOS . " AND status <> 'ABERTO'", [$me]);
-$atrasados   = (int)db_val("SELECT COUNT(*) FROM protocolo WHERE responsavel = ? AND status IN " . SQL_ATIVOS . " AND previsaoEntrega < CURDATE()", [$me]);
-$finalHoje   = (int)db_val("SELECT COUNT(*) FROM protocolo WHERE responsavel = ? AND status = 'FINALIZADO' AND dataFinalizacao = CURDATE()", [$me]);
-$totalOc     = (int)db_val('SELECT COUNT(*) FROM protocolo WHERE responsavel = ?', [$me]);
+// As ocorrências são compartilhadas: todo colaborador vê as de toda a oficina.
+// Só a "Minha avaliação" continua sendo individual.
+$emAberto    = (int)db_val("SELECT COUNT(*) FROM protocolo WHERE status = 'ABERTO'");
+$emAndamento = (int)db_val("SELECT COUNT(*) FROM protocolo WHERE status IN " . SQL_ATIVOS . " AND status <> 'ABERTO'");
+$atrasados   = (int)db_val("SELECT COUNT(*) FROM protocolo WHERE status IN " . SQL_ATIVOS . " AND previsaoEntrega < CURDATE()");
+$finalHoje   = (int)db_val("SELECT COUNT(*) FROM protocolo WHERE status = 'FINALIZADO' AND dataFinalizacao = CURDATE()");
+$totalOc     = (int)db_val('SELECT COUNT(*) FROM protocolo');
 $ocSemana    = (int)db_val('SELECT COUNT(*) FROM protocolo p JOIN ocorrencia o ON o.id = p.idOcorrencia
-                            WHERE p.responsavel = ? AND o.dataRegistro >= NOW() - INTERVAL 7 DAY', [$me]);
-$finalMes    = (int)db_val("SELECT COUNT(*) FROM protocolo WHERE responsavel = ? AND status = 'FINALIZADO'
-                            AND YEAR(dataFinalizacao) = YEAR(CURDATE()) AND MONTH(dataFinalizacao) = MONTH(CURDATE())", [$me]);
+                            WHERE o.dataRegistro >= NOW() - INTERVAL 7 DAY');
+$finalMes    = (int)db_val("SELECT COUNT(*) FROM protocolo WHERE status = 'FINALIZADO'
+                            AND YEAR(dataFinalizacao) = YEAR(CURDATE()) AND MONTH(dataFinalizacao) = MONTH(CURDATE())");
 $minhaNota   = db_one('SELECT AVG(a.nota) AS media, COUNT(*) AS total FROM avaliacao a
                        JOIN protocolo p ON p.numero = a.numeroProtocolo WHERE p.responsavel = ?', [$me]);
 
-// ─── MEUS ATENDIMENTOS (abas) ────────────────────────────────────────────────
+// ─── ATENDIMENTOS DA OFICINA (abas) ────────────────────────────────────────────────
 $abas = [
     'aberto'      => ['Em aberto',        "p.status = 'ABERTO'"],
     'andamento'   => ['Em andamento',     "p.status IN " . SQL_ATIVOS . " AND p.status <> 'ABERTO'"],
     'finalizados' => ['Finalizados hoje', "p.status = 'FINALIZADO' AND p.dataFinalizacao = CURDATE()"],
 ];
 $aba = array_key_exists($_GET['tab'] ?? '', $abas) ? $_GET['tab'] : ($emAberto || !$emAndamento ? 'aberto' : 'andamento');
-$atendimentos = db_all("SELECT p.numero, p.status, p.previsaoEntrega, c.nome AS cliente, v.placa, o.descricao
+$atendimentos = db_all("SELECT p.numero, p.status, p.previsaoEntrega, p.responsavel, col.nome AS responsavelNome,
+                               c.nome AS cliente, v.placa, o.descricao
                         FROM protocolo p
-                        JOIN ocorrencia o ON o.id = p.idOcorrencia
-                        JOIN veiculo v    ON v.id = p.idVeiculo
-                        JOIN cliente c    ON c.id = v.idCliente
-                        WHERE p.responsavel = ? AND {$abas[$aba][1]}
-                        ORDER BY p.numero DESC", [$me]);
+                        JOIN ocorrencia o    ON o.id = p.idOcorrencia
+                        JOIN veiculo v       ON v.id = p.idVeiculo
+                        JOIN cliente c       ON c.id = v.idCliente
+                        JOIN colaborador col ON col.id = p.responsavel
+                        WHERE {$abas[$aba][1]}
+                        ORDER BY p.numero DESC");
 
 // ─── VEÍCULO EM FOCO: o do atendimento ativo mais recente ────────────────────
+// Prefere um atendimento do próprio colaborador; se não houver, mostra o de qualquer um.
 $foco = db_one("SELECT p.numero, p.status, p.previsaoEntrega, v.id, v.placa, v.ano, v.cor, mo.nome AS modelo, ma.nome AS marca,
                        c.nome AS cliente, c.telefone
                 FROM protocolo p
@@ -39,8 +44,8 @@ $foco = db_one("SELECT p.numero, p.status, p.previsaoEntrega, v.id, v.placa, v.a
                 JOIN modelo mo ON mo.id = v.idModelo
                 JOIN marca ma  ON ma.id = mo.idMarca
                 JOIN cliente c ON c.id = v.idCliente
-                WHERE p.responsavel = ? AND p.status IN " . SQL_ATIVOS . "
-                ORDER BY p.status = 'EM_ATENDIMENTO' DESC, p.numero DESC LIMIT 1", [$me]);
+                WHERE p.status IN " . SQL_ATIVOS . "
+                ORDER BY p.responsavel = ? DESC, p.status = 'EM_ATENDIMENTO' DESC, p.numero DESC LIMIT 1", [$me]);
 $histFoco = $foco ? db_all("SELECT p.numero, p.dataFinalizacao, o.descricao
                             FROM protocolo p JOIN ocorrencia o ON o.id = p.idOcorrencia
                             WHERE p.idVeiculo = ? AND p.status = 'FINALIZADO'
@@ -81,7 +86,7 @@ $pendentes = $emAberto + $emAndamento;
     <div>
       <div class="page-title">Meu Painel</div>
       <div class="page-sub"><?= $saudacao ?>, <?= e(primeiro_nome($u['nome'])) ?>.
-        <?= $pendentes ? 'Você tem ' . plural($pendentes, 'atendimento', 'atendimentos') . ' em aberto.' : 'Nenhum atendimento pendente.' ?></div>
+        <?= $pendentes ? 'A oficina tem ' . plural($pendentes, 'atendimento', 'atendimentos') . ' em aberto.' : 'Nenhum atendimento pendente.' ?></div>
     </div>
     <div class="page-date"><?= data_hoje() ?></div>
   </div>
@@ -112,10 +117,10 @@ $pendentes = $emAberto + $emAndamento;
   <div class="two-col">
 
     <div class="stack">
-      <!-- Meus atendimentos -->
+      <!-- Atendimentos da oficina -->
       <div class="card">
         <div class="card-header">
-          <div class="card-title">Meus atendimentos</div>
+          <div class="card-title">Atendimentos da oficina</div>
           <a class="card-action" href="../admin/historico.php">Ver histórico →</a>
         </div>
 
@@ -138,6 +143,7 @@ $pendentes = $emAberto + $emAndamento;
               <th>Cliente</th>
               <th>Veículo</th>
               <th>Ocorrência</th>
+              <th>Responsável</th>
               <th>Status</th>
             </tr>
           </thead>
@@ -148,6 +154,7 @@ $pendentes = $emAberto + $emAndamento;
               <td data-label="Cliente"><?= e($a['cliente']) ?></td>
               <td data-label="Veículo"><span class="td-plate"><?= e($a['placa']) ?></span></td>
               <td data-label="Ocorrência"><?= e(mb_strimwidth($a['descricao'], 0, 48, '…')) ?></td>
+              <td data-label="Responsável"><?= $a['responsavel'] === $me ? 'Você' : e(primeiro_nome($a['responsavelNome'])) ?></td>
               <td data-label="Status">
                 <?= badge(status_protocolo($a['status'])) ?>
                 <?php if (atrasado($a['previsaoEntrega'], $a['status'])): ?><span class="badge late">Atrasado</span><?php endif; ?>

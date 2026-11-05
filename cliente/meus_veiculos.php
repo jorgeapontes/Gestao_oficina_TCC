@@ -14,7 +14,7 @@ if (in_array(acao(), ['criar', 'editar'], true)) {
         flash('err', 'Placa inválida. Use o formato ABC-1234 ou ABC1D23.');
     } else {
         try {
-            $d = dados_veiculo_do_formulario();   // marca/modelo (catálogo ou digitados) e ano
+            $d = dados_veiculo_do_formulario();   // marca (lista ou digitada), modelo e ano
             if (isset($d['erro'])) {
                 flash('err', $d['erro']);
             } elseif (acao() === 'criar') {
@@ -58,7 +58,6 @@ $veiculos = db_all("SELECT v.id, v.placa, v.ano, v.cor, mo.nome AS modelo, ma.id
                     JOIN modelo mo ON mo.id = v.idModelo
                     JOIN marca ma  ON ma.id = mo.idMarca
                     WHERE v.idCliente = ? ORDER BY v.placa", [$u['id']]);
-$marcas = db_all('SELECT id, nome FROM marca ORDER BY nome');
 ?>
 <!DOCTYPE html>
 <html lang="pt-BR">
@@ -162,24 +161,9 @@ $marcas = db_all('SELECT id, nome FROM marca ORDER BY nome');
         <label for="f-placa">Placa</label>
         <input type="text" name="placa" id="f-placa" placeholder="ABC-1234" maxlength="8" style="text-transform:uppercase" data-mask="placa" required/>
       </div>
-      <?php campos_carpedia_veiculo(); ?>
-      <fieldset class="blk" id="f-manual">
-        <div class="field-row">
-          <div class="field">
-            <label for="f-marca">Marca</label>
-            <select name="idMarca" id="f-marca" required>
-              <option value="">Selecione</option>
-              <?php foreach ($marcas as $m): ?><option value="<?= e($m['id']) ?>"><?= e($m['nome']) ?></option><?php endforeach; ?>
-            </select>
-          </div>
-          <div class="field">
-            <label for="f-modelo">Modelo</label>
-            <input type="text" name="modelo" id="f-modelo" placeholder="Ex: Corolla" maxlength="100" required/>
-          </div>
-        </div>
-      </fieldset>
+      <?php campos_marca_modelo_veiculo(); ?>
       <div class="field-row">
-        <div class="field" id="ano-wrap">
+        <div class="field">
           <label for="f-ano">Ano</label>
           <input type="number" name="ano" id="f-ano" placeholder="2020" min="1900" max="<?= date('Y') + 1 ?>" inputmode="numeric" required/>
         </div>
@@ -198,7 +182,6 @@ $marcas = db_all('SELECT id, nome FROM marca ORDER BY nome');
 
 <?php flash_html(); ?>
 
-<script src="<?= e(asset('assets/js/carpedia.js', '../')) ?>"></script>
 <script>
   function openModal(v) {
     const edit = !!v;
@@ -207,11 +190,10 @@ $marcas = db_all('SELECT id, nome FROM marca ORDER BY nome');
     document.getElementById('f-action').value = edit ? 'editar' : 'criar';
     document.getElementById('f-id').value     = edit ? v.id : '';
     document.getElementById('f-placa').value  = edit ? v.placa : '';
-    document.getElementById('f-marca').value  = edit ? v.idMarca : '';
+    preencherMarca(edit ? v.marca : '');
     document.getElementById('f-modelo').value = edit ? v.modelo : '';
     document.getElementById('f-ano').value    = edit ? v.ano : '';
     document.getElementById('f-cor').value    = edit ? v.cor : '';
-    Carpedia.abrir(edit);
     abrirModal('modal');
   }
   <?php if (isset($_GET['novo'])): ?>openModal();<?php endif; ?>

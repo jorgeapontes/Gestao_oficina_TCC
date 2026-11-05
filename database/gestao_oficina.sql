@@ -105,6 +105,7 @@ INSERT INTO `marca` (`id`, `nome`) VALUES
 ('3a000000-0000-4000-8000-000000000003', 'Ford'),
 ('3a000000-0000-4000-8000-000000000004', 'Honda'),
 ('3a000000-0000-4000-8000-000000000005', 'Hyundai'),
+('3a000000-0000-4000-8000-00000000000a', 'Jeep'),
 ('3a000000-0000-4000-8000-000000000006', 'Nissan'),
 ('3a000000-0000-4000-8000-000000000007', 'Renault'),
 ('3a000000-0000-4000-8000-000000000008', 'Toyota'),
@@ -366,17 +367,6 @@ CREATE TABLE `tentativa_login` (
   `dataHora` datetime NOT NULL DEFAULT current_timestamp(),
   PRIMARY KEY (`id`),
   KEY `idx_tentativa` (`tipo`, `chave`, `dataHora`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
-
---
--- Cache das respostas da Carpedia (marcas, modelos e versões). Cada recurso ocupa uma única
--- linha, sobrescrita quando expira (sem cópias históricas).
---
-CREATE TABLE `carpedia_cache` (
-  `caminho` varchar(190) NOT NULL,
-  `resposta` mediumtext NOT NULL,
-  `buscadoEm` datetime NOT NULL DEFAULT current_timestamp(),
-  PRIMARY KEY (`caminho`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 COMMIT;
 
